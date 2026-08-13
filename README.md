@@ -43,7 +43,7 @@ GitHub 源安装会执行包内 prepare 脚本，如被 pnpm 拦截，把提示�
 
 ## 安全与限制 Safety and limitations
 
-- **完整应用类插件会被拦截**：安装前会抓取 GitHub manifest 分类，面向其他 profile 的完整应用（如 TUI 客户端，含 `@deepseek-ai/dsh-agent` 等依赖且无 web client 声明）装进 web 会与内置应用冲突导致启动失败（重复 api-gateway），面板会拒绝并给出对应 profile 的安装建议
+- **完整应用类插件会被拦截**：安装前会抓取 GitHub manifest 分类（raw.githubusercontent.com 失败时自动回退 raw.gitmirror.com），面向其他 profile 的完整应用（如 TUI 客户端，含 `@deepseek-ai/dsh-agent` 等依赖且无 web client 声明）装进 web 会与内置应用冲突导致启动失败（重复 api-gateway），面板会拒绝并给出对应 profile 的安装建议；确认来源可信时也可在确认弹窗勾选"跳过完整应用类型检查"（风险自负）
 - 安装 / 卸载后需重启 web 服务生效（本插件不做自动重启）
 - 目录数据来自官网静态页解析，官网无 JSON API；插件数量与分类以官网为准
 

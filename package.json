@@ -25,6 +25,14 @@
     "ui"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/<your-github-username>/dsh-webui-market-plugin.git"
+  },
+  "homepage": "https://github.com/<your-github-username>/dsh-webui-market-plugin",
+  "bugs": {
+    "url": "https://github.com/<your-github-username>/dsh-webui-market-plugin/issues"
+  },
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
   },
