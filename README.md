@@ -7,14 +7,9 @@ An in-harness community plugin market for the dsh web GUI: browse the awesome-ds
 ## 安装 Install
 
 ```sh
-dsh plugin --profile web add github:<你的GitHub用户名>/dsh-webui-market-plugin
+dsh plugin --profile web add github:Sanqi-normal/dsh-webui-market-plugin
 ```
 
-如果发布到了 npm registry，也可以：
-
-```sh
-dsh plugin --profile web add @<你的GitHub用户名>/dsh-webui-market-plugin
-```
 
 安装后**重启 web 服务**生效：
 
@@ -61,13 +56,14 @@ dsh plugin --profile web add link:C:/绝对路径/dsh-webui-market-plugin
 npm test    # node --test tests/*.test.mjs
 ```
 
-## 发布前 Before publishing
+## 发布 Publishing
 
-> 包名当前用了占位作用域 `@dsh-webui`，发布前请替换为你自己的：
+包名 `@sanqi-normal/dsh-webui-market-plugin`（npm 作用域必须小写；GitHub 仓库为 `Sanqi-normal/dsh-webui-market-plugin`），`repository` / `homepage` / `bugs` / `LICENSE` 均已填好。
 
-1. `package.json`：`name` 改为 `@<你的GitHub用户名>/dsh-webui-market-plugin`；补上 `repository` / `homepage` / `bugs` 字段
-2. `lib/client.js` 顶部 `__ModuleLoader__.load({ id: ... })` 同步改为新的包名（必须与 `package.json` 的 `name` 一致）
-3. `cordis.patch.yml` 中 `name` 同步改为新的包名
-4. `LICENSE` 的版权信息改为你的名字
+发布前检查：
 
-包名在本地 profile 中作为依赖键使用，改名后需重新 `dsh plugin --profile web add` 或直接更新 profile 的 `package.json`。
+1. `npm publish --dry-run` 确认发布内容只含 `lib/`、`cordis.patch.yml`、`README.md`、`LICENSE`、`package.json`
+2. npm 账号需拥有 `@sanqi-normal` 作用域（npm 用户名通常与 GitHub 相同；不一致时先创建同名 npm 账号或改 scope）
+3. 推送 GitHub 后，安装验证：`dsh plugin --profile web add github:Sanqi-normal/dsh-webui-market-plugin`
+
+> 包名是本地 profile 中的依赖键：本地改名前需重新 `dsh plugin --profile web remove @sanqi-normal/dsh-webui-market-plugin && dsh plugin --profile web add link:本目录`（或直接装 GitHub 源）。

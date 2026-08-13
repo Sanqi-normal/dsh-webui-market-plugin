@@ -4,4 +4,4 @@
 
 - insert:
     - id: dsh-market-plugin
-      name: '@dsh-webui/dsh-webui-market-plugin'
+      name: '@sanqi-normal/dsh-webui-market-plugin'

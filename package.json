@@ -1,5 +1,5 @@
 {
-  "name": "@dsh-webui/dsh-webui-market-plugin",
+  "name": "@sanqi-normal/dsh-webui-market-plugin",
   "description": "In-harness community plugin market for the dsh web GUI: browse awesome-dsh-plugin.com, install and uninstall plugins into a profile",
   "version": "0.1.0",
   "type": "module",
@@ -27,11 +27,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/<your-github-username>/dsh-webui-market-plugin.git"
+    "url": "git+https://github.com/Sanqi-normal/dsh-webui-market-plugin.git"
   },
-  "homepage": "https://github.com/<your-github-username>/dsh-webui-market-plugin",
+  "homepage": "https://github.com/Sanqi-normal/dsh-webui-market-plugin",
   "bugs": {
-    "url": "https://github.com/<your-github-username>/dsh-webui-market-plugin/issues"
+    "url": "https://github.com/Sanqi-normal/dsh-webui-market-plugin/issues"
   },
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
