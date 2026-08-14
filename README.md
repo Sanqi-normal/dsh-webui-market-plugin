@@ -4,6 +4,12 @@
 
 An in-harness community plugin market for the dsh web GUI: browse the awesome-dsh-plugin.com catalog and install/uninstall plugins into a profile from **Settings → Plugins → Plugin Market**.
 
+## 推荐 Recommended
+
+本插件为社区独立实现，**推荐优先使用网站官方实现 [dsh-market](https://github.com/dsh-market/dsh-market)**（由 awesome-dsh-plugin.com 维护者开发，功能一致、维护更活跃）。
+
+A community implementation — **prefer the official [dsh-market](https://github.com/dsh-market/dsh-market)** by the awesome-dsh-plugin.com maintainer (same functionality, more actively maintained).
+
 ## 效果展示 Screenshot
 
 ![插件市场效果](img/7f0810a3710382f3810e9aa42f160cc1.png)
