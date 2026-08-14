@@ -4,12 +4,23 @@
 
 An in-harness community plugin market for the dsh web GUI: browse the awesome-dsh-plugin.com catalog and install/uninstall plugins into a profile from **Settings → Plugins → Plugin Market**.
 
+## 效果展示 Screenshot
+
+![插件市场效果](img/7f0810a3710382f3810e9aa42f160cc1.png)
+
 ## 安装 Install
+
+方式一：从 **npm registry** 安装（推荐，无 git 克隆 / prepare 脚本步骤）：
+
+```sh
+dsh plugin --profile web add @sanqi-normal/dsh-webui-market-plugin
+```
+
+方式二：从 GitHub 源码安装：
 
 ```sh
 dsh plugin --profile web add github:Sanqi-normal/dsh-webui-market-plugin
 ```
-
 
 安装后**重启 web 服务**生效：
 
@@ -28,6 +39,8 @@ GitHub 源安装会执行包内 prepare 脚本，如被 pnpm 拦截，把提示�
 - **安装 / 卸载** 以弹窗形式确认，任务后台执行、实时显示 pnpm 输出，可最小化到后台、随时终止；超过 120 秒自动超时报错
 - 每个插件卡片显示真实的已安装状态（与 profile 的 `package.json` 同步）
 - 顶部显示插件目录来源官网链接，可直接打开
+
+
 
 ## 工作原理 How it works
 
@@ -62,8 +75,8 @@ npm test    # node --test tests/*.test.mjs
 
 发布前检查：
 
-1. `npm publish --dry-run` 确认发布内容只含 `lib/`、`cordis.patch.yml`、`README.md`、`LICENSE`、`package.json`
+1. `npm publish --dry-run` 确认发布内容只含 `lib/`、`cordis.patch.yml`、`README.md`、`LICENSE`、`package.json`、`img/`（README 效果图）
 2. npm 账号需拥有 `@sanqi-normal` 作用域（npm 用户名通常与 GitHub 相同；不一致时先创建同名 npm 账号或改 scope）
-3. 推送 GitHub 后，安装验证：`dsh plugin --profile web add github:Sanqi-normal/dsh-webui-market-plugin`
+3. 推送 GitHub 后，安装验证：`dsh plugin --profile web add github:Sanqi-normal/dsh-webui-market-plugin`；发布 npm 后验证：`npm view @sanqi-normal/dsh-webui-market-plugin`，registry 安装：`dsh plugin --profile web add @sanqi-normal/dsh-webui-market-plugin`
 
 > 包名是本地 profile 中的依赖键：本地改名前需重新 `dsh plugin --profile web remove @sanqi-normal/dsh-webui-market-plugin && dsh plugin --profile web add link:本目录`（或直接装 GitHub 源）。
