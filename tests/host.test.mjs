@@ -205,6 +205,15 @@ const busy = await call({ method: 'install', source: 'github:x/y', profile: 'web
 check('busy while op live', busy.ok === false && busy.busy === true, busy)
 await call({ method: 'kill' })
 
+// uninstall: hot-mount dispose is a no-op when no live mount exists, and the
+// remove op still starts normally (fake bin exits 0).
+writeFileSync(fakeBin, `setTimeout(() => { process.exit(0) }, 300)\n`)
+const uninstCall = await call({ method: 'uninstall', pkg: 'whale-girl', profile: 'web', binPath: fakeBin, label: 'whale-girl' })
+check('uninstall starts op (dispose no-op safe)', uninstCall.ok === true && uninstCall.opId, uninstCall)
+await new Promise((r) => setTimeout(r, 500))
+const uninstOp = await call({ method: 'op', opId: uninstCall.opId })
+check('uninstall op settles done', uninstOp.ok && uninstOp.op && uninstOp.op.status === 'done', uninstOp)
+
 const tail = skipped > 0 ? ' (' + skipped + ' skipped)' : ''
 console.log(failures === 0 ? 'ALL PASS' + tail : failures + ' FAILURES' + tail)
 process.exit(failures === 0 ? 0 : 1)
