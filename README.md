@@ -34,7 +34,7 @@ GitHub 源安装会执行包内 prepare 脚本，如被 pnpm 拦截，把提示�
 
 打开 **设置（Settings）→ 插件（Plugins）→ 插件市场（Plugin Market）**：
 
-- 目录按分类分组，支持搜索与"已安装"过滤
+- 目录按分类分组，支持搜索与"已安装"过滤；每个卡片显示 GitHub Star 数（无数据不显示），可一键按 **最热（Star 降序，无 Star 的排最后）/ 最新（收录日期）** 排序，或恢复官网默认顺序
 - 点 **详情** 查看该插件的官方安装命令（含目标 profile）
 - **安装 / 卸载** 以弹窗形式确认，任务后台执行、实时显示 pnpm 输出，可最小化到后台、随时终止；超过 120 秒自动超时报错
 - 每个插件卡片显示真实的已安装状态（与 profile 的 `package.json` 同步）
@@ -46,7 +46,7 @@ GitHub 源安装会执行包内 prepare 脚本，如被 pnpm 拦截，把提示�
 
 持久化 bundle（`package.json` 的 `dsh.bundle.patch` → `cordis.patch.yml`），由 `dsh plugin add` 的 reconcile 自动加入 profile 的 `dsh.profile.bundles` 层：
 
-- **Host 半**（`lib/host.js`）：注册 `/api/dsh-market` 路由，提供 `list`（抓取并解析官网目录）、`probe`（环境探测）、`installed`（读取 profile package.json）、`install` / `uninstall`（后台 spawn `dsh plugin` CLI）、`op`（轮询任务状态）、`kill`（终止任务）
+- **Host 半**（`lib/host.js`）：注册 `/api/dsh-market` 路由，提供 `list`（读取官网 JSON API `plugins.json`，失败回退静态页解析 / 离线快照，含 stars/added）、`probe`（环境探测）、`installed`（读取 profile package.json）、`install` / `uninstall`（后台 spawn `dsh plugin` CLI）、`op`（轮询任务状态）、`kill`（终止任务）
 - **Client 半**（`lib/client.js`）：通过 `exports["./client"]` + `dsh.client` 声明被 web 前端加载，注册到 `settings.plugins.tab` 槽位
 
 ## 安全与限制 Safety and limitations
@@ -60,4 +60,4 @@ GitHub 源安装会执行包内 prepare 脚本，如被 pnpm 拦截，把提示�
 - **安装前自动快照**：写入真实 profile 前会把 `package.json` 备份为同目录 `.mkts-snapshot-<时间戳>.json`，配合 `dsh plugin --profile web remove <包名>` 可手工回退
 - **CI=true**：pnpm 子进程以 CI 模式运行，避免无 TTY 时静默卡在交互提示
 - 安装 / 卸载后需重启 web 服务生效（热挂载成功的除外，本插件不做自动重启）
-- 目录数据来自官网静态页解析，官网无 JSON API；插件数量与分类以官网为准
+- 目录数据优先来自官网 JSON API（`plugins.json`，与 [dsh-market](https://github.com/dsh-market/dsh-market) 同源，含 Star 数），API 不可用时回退官网静态页解析，再回退内置离线快照；插件数量与分类以官网为准
