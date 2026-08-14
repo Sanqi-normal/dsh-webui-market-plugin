@@ -1,4 +1,4 @@
-# dsh-webui-market-plugin
+# dsh-webui-market-plugin[![awesome · DSH plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com)
 
 在 dsh web GUI 内部的社区插件市场：浏览 [awesome-dsh-plugin.com](https://awesome-dsh-plugin.com/) 的插件目录，直接在 **设置 → 插件 → 插件市场** 里安装 / 卸载插件到 profile。界面风格与 harness 前端一致（跟随系统深浅色主题），支持中英文（按系统语言自动切换）。
 
@@ -54,29 +54,3 @@ GitHub 源安装会执行包内 prepare 脚本，如被 pnpm 拦截，把提示�
 - **完整应用类插件会被拦截**：安装前会抓取 GitHub manifest 分类（raw.githubusercontent.com 失败时自动回退 raw.gitmirror.com），面向其他 profile 的完整应用（如 TUI 客户端，含 `@deepseek-ai/dsh-agent` 等依赖且无 web client 声明）装进 web 会与内置应用冲突导致启动失败（重复 api-gateway），面板会拒绝并给出对应 profile 的安装建议；确认来源可信时也可在确认弹窗勾选"跳过完整应用类型检查"（风险自负）
 - 安装 / 卸载后需重启 web 服务生效（本插件不做自动重启）
 - 目录数据来自官网静态页解析，官网无 JSON API；插件数量与分类以官网为准
-
-## 开发 Development
-
-本地开发用 link 方式装进 profile：
-
-```sh
-dsh plugin --profile web add link:C:/绝对路径/dsh-webui-market-plugin
-```
-
-测试：
-
-```sh
-npm test    # node --test tests/*.test.mjs
-```
-
-## 发布 Publishing
-
-包名 `@sanqi-normal/dsh-webui-market-plugin`（npm 作用域必须小写；GitHub 仓库为 `Sanqi-normal/dsh-webui-market-plugin`），`repository` / `homepage` / `bugs` / `LICENSE` 均已填好。
-
-发布前检查：
-
-1. `npm publish --dry-run` 确认发布内容只含 `lib/`、`cordis.patch.yml`、`README.md`、`LICENSE`、`package.json`、`img/`（README 效果图）
-2. npm 账号需拥有 `@sanqi-normal` 作用域（npm 用户名通常与 GitHub 相同；不一致时先创建同名 npm 账号或改 scope）
-3. 推送 GitHub 后，安装验证：`dsh plugin --profile web add github:Sanqi-normal/dsh-webui-market-plugin`；发布 npm 后验证：`npm view @sanqi-normal/dsh-webui-market-plugin`，registry 安装：`dsh plugin --profile web add @sanqi-normal/dsh-webui-market-plugin`
-
-> 包名是本地 profile 中的依赖键：本地改名前需重新 `dsh plugin --profile web remove @sanqi-normal/dsh-webui-market-plugin && dsh plugin --profile web add link:本目录`（或直接装 GitHub 源）。
