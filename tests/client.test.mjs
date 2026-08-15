@@ -180,6 +180,7 @@ function extractFunction(source, name) {
 const installedPkgName = new Function(
   extractFunction(src, 'repoNameOf') + '\n' +
   extractFunction(src, 'repoOfValue') + '\n' +
+  extractFunction(src, 'repoPathOf') + '\n' +
   extractFunction(src, 'installedPkgName') + '\n; return installedPkgName',
 )()
 
@@ -209,4 +210,46 @@ checkMatch('installedPkgName bundle entry ignores case',
 checkMatch('installedPkgName still rejects unrelated package',
   installedPkgName(mixedRepo, { dependencies: { 'other-plugin': '^1.0.0' }, bundles: [] }) === null,
   installedPkgName(mixedRepo, { dependencies: { 'other-plugin': '^1.0.0' }, bundles: [] }))
+
+// --- author-aware matching: same repo basename, different owners (the bug) ---
+// The catalog actually carries both Jesse-njx/dsh-memory and flymysql/dsh-memory;
+// installing one must not mark the other author's card as installed.
+const jesse = { url: 'https://github.com/Jesse-njx/dsh-memory' }
+const flymysql = { url: 'https://github.com/flymysql/dsh-memory' }
+const colliding = { dependencies: { 'dsh-memory': 'github:Jesse-njx/dsh-memory' }, bundles: ['dsh-memory'] }
+checkMatch('collision: author-identical card reports installed',
+  installedPkgName(jesse, colliding) === 'dsh-memory', installedPkgName(jesse, colliding))
+checkMatch('collision: other-author card is NOT installed (regression)',
+  installedPkgName(flymysql, colliding) === null, installedPkgName(flymysql, colliding))
+
+// Host-resolved identity (repos map) disambiguates npm-keyed installs: the
+// dependency key is the short name but the manifest resolves the real owner.
+checkMatch('collision: host repos identity marks the installed author',
+  installedPkgName(flymysql, { dependencies: { 'dsh-memory': '^1.0.0' }, repos: { 'dsh-memory': 'flymysql/dsh-memory' } }) === 'dsh-memory',
+  installedPkgName(flymysql, { dependencies: { 'dsh-memory': '^1.0.0' }, repos: { 'dsh-memory': 'flymysql/dsh-memory' } }))
+checkMatch('collision: host repos identity rejects the other author',
+  installedPkgName(jesse, { dependencies: { 'dsh-memory': '^1.0.0' }, repos: { 'dsh-memory': 'flymysql/dsh-memory' } }) === null,
+  installedPkgName(jesse, { dependencies: { 'dsh-memory': '^1.0.0' }, repos: { 'dsh-memory': 'flymysql/dsh-memory' } }))
+
+// github: spec with #fragment and mixed case still resolves to identity.
+checkMatch('collision: github: value with #fragment matches by identity',
+  installedPkgName(jesse, { dependencies: { 'dsh-memory': 'github:Jesse-njx/dsh-memory#abc123' } }) === 'dsh-memory',
+  installedPkgName(jesse, { dependencies: { 'dsh-memory': 'github:Jesse-njx/dsh-memory#abc123' } }))
+
+// repoPathOf unit checks: monorepo sub-paths, .git, scoped npm, versions.
+const repoPathOf = new Function(
+  extractFunction(src, 'repoPathOf') + '\n; return repoPathOf',
+)()
+checkMatch('repoPathOf strips host + tree subpath',
+  repoPathOf('https://github.com/PC2005-cloud/dsh-pet/tree/main/dsh-pet') === 'pc2005-cloud/dsh-pet', repoPathOf('https://github.com/PC2005-cloud/dsh-pet/tree/main/dsh-pet'))
+checkMatch('repoPathOf strips .git and case',
+  repoPathOf('https://github.com/omdsh-dev/DSH-better-sidebar.git') === 'omdsh-dev/dsh-better-sidebar', repoPathOf('https://github.com/omdsh-dev/DSH-better-sidebar.git'))
+checkMatch('repoPathOf accepts github: spec',
+  repoPathOf('github:huiliyi37/dsh-tianshu-tui') === 'huiliyi37/dsh-tianshu-tui', repoPathOf('github:huiliyi37/dsh-tianshu-tui'))
+checkMatch('repoPathOf null for scoped npm name (scope != owner)',
+  repoPathOf('@anionex/dsh-vision-toolkit') === null, repoPathOf('@anionex/dsh-vision-toolkit'))
+checkMatch('repoPathOf null for version range',
+  repoPathOf('^1.0.0') === null, repoPathOf('^1.0.0'))
+checkMatch('repoPathOf null for relative path',
+  repoPathOf('../foo/bar') === null, repoPathOf('../foo/bar'))
 if (matchFailures > 0) process.exit(1)

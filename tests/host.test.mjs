@@ -12,7 +12,7 @@ mkdirSync(join(TEST_HOME, 'profiles', 'web'), { recursive: true })
 writeFileSync(join(TEST_HOME, 'profiles', 'web', 'package.json'), JSON.stringify({
   name: 'dsh-profile-web',
   private: true,
-  dependencies: { 'fake-installed': '^1.0.0' },
+  dependencies: { 'fake-installed': '^1.0.0', 'github-dep': 'github:Jesse-njx/dsh-memory' },
   dsh: { profile: { bundles: ['fake-installed', 'builtin-bundle'] } },
 }, null, 2) + '\n')
 process.env.DSH_HOME = TEST_HOME
@@ -81,11 +81,16 @@ check('probe env', probe.ok && probe.dshHome === TEST_HOME && probe.node && prob
 
 const inst = await call({ method: 'installed' })
 check('installed shape', inst.ok && Array.isArray(inst.bundles) && typeof inst.dependencies === 'object' && Array.isArray(inst.disabled), inst)
+check('installed returns repos identity map', inst.ok && inst.repos
+  && inst.repos['github-dep'] === 'jesse-njx/dsh-memory'
+  && inst.repos['fake-installed'] === null, inst)
 
 const all = await call({ method: 'installedAll' })
 check('installedAll lists dep + builtin', all.ok
   && Array.isArray(all.plugins) && all.plugins.some((p) => p.name === 'fake-installed')
   && Array.isArray(all.builtin) && all.builtin.includes('builtin-bundle'), all)
+check('installedAll rows carry resolved repo identity', all.ok
+  && all.plugins.some((p) => p.name === 'github-dep' && p.repo === 'jesse-njx/dsh-memory'), all.plugins)
 
 const emptyOp = await call({ method: 'op' })
 check('op empty -> null queue/history', emptyOp.ok && emptyOp.op === null
@@ -203,6 +208,32 @@ check('parseSite null stars when absent', parsedSite.plugins[1].stars === null
   && parsedSite.plugins[1].name === 'dsh-plugin-hub' && parsedSite.plugins[1].by === 'Noob-stupid', parsedSite.plugins[1])
 check('parseSite cats', parsedSite.cats.length === 2 && parsedSite.cats[0].id === 'all' && parsedSite.cats[0].count === 2, parsedSite.cats)
 
+// --- author-aware identity matching (same repo basename, different owners) ---
+check('githubIdentity from url', mod.githubIdentity('https://github.com/Jesse-njx/dsh-memory') === 'jesse-njx/dsh-memory',
+  mod.githubIdentity('https://github.com/Jesse-njx/dsh-memory'))
+check('githubIdentity from repository object + git+ scheme',
+  mod.githubIdentity({ type: 'git', url: 'git+https://github.com/flymysql/dsh-memory.git' }) === 'flymysql/dsh-memory',
+  mod.githubIdentity({ type: 'git', url: 'git+https://github.com/flymysql/dsh-memory.git' }))
+check('githubIdentity null for scoped npm name (scope != owner)',
+  mod.githubIdentity('@anionex/dsh-vision-toolkit') === null, mod.githubIdentity('@anionex/dsh-vision-toolkit'))
+check('githubIdentity null for version range',
+  mod.githubIdentity('^1.0.0') === null, mod.githubIdentity('^1.0.0'))
+
+const jesseCard = { url: 'https://github.com/Jesse-njx/dsh-memory' }
+const flyCard = { url: 'https://github.com/flymysql/dsh-memory' }
+check('matchesCatalog identity match', mod.matchesCatalog('dsh-memory', 'github:Jesse-njx/dsh-memory', jesseCard) === true,
+  mod.matchesCatalog('dsh-memory', 'github:Jesse-njx/dsh-memory', jesseCard))
+check('matchesCatalog rejects different author (regression)', mod.matchesCatalog('dsh-memory', 'github:Jesse-njx/dsh-memory', flyCard) === false,
+  mod.matchesCatalog('dsh-memory', 'github:Jesse-njx/dsh-memory', flyCard))
+check('matchesCatalog knownIdentity resolves npm spec', mod.matchesCatalog('dsh-memory', '^1.0.0', flyCard, 'flymysql/dsh-memory') === true,
+  mod.matchesCatalog('dsh-memory', '^1.0.0', flyCard, 'flymysql/dsh-memory'))
+check('matchesCatalog knownIdentity rejects other author', mod.matchesCatalog('dsh-memory', '^1.0.0', jesseCard, 'flymysql/dsh-memory') === false,
+  mod.matchesCatalog('dsh-memory', '^1.0.0', jesseCard, 'flymysql/dsh-memory'))
+check('matchesCatalog legacy basename fallback preserved', mod.matchesCatalog('dsh-better-sidebar', '^1.0.0', { url: 'https://github.com/omdsh-dev/DSH-better-sidebar' }) === true,
+  mod.matchesCatalog('dsh-better-sidebar', '^1.0.0', { url: 'https://github.com/omdsh-dev/DSH-better-sidebar' }))
+check('resolveDepIdentityFrom reads github spec', mod.resolveDepIdentityFrom('dsh-memory', 'github:Jesse-njx/dsh-memory') === 'jesse-njx/dsh-memory',
+  mod.resolveDepIdentityFrom('dsh-memory', 'github:Jesse-njx/dsh-memory'))
+
 // --- registryToCatalog: plugins.json -> card shape (stars/added/owner) ---
 const regFixture = {
   categories: {
@@ -234,6 +265,30 @@ check('registryToCatalog cats (all + per category)', mapped.cats.length === 3
 const mappedEn = mod.registryToCatalog(regFixture, 'en')
 check('registryToCatalog localizes desc/labels', mappedEn.plugins[0].desc === 'TUI'
   && mappedEn.cats[0].label === 'All' && mappedEn.cats[1].label === 'UI Enhancements', mappedEn.cats[1])
+
+// --- supply-chain release-age auto-heal (pnpm >=11 default 24h policy) ---
+const violationOut = '[ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION] 1 lockfile entries failed verification:\n'
+  + '  dsh-model-picker@1.0.2 was published at 2026-08-15T07:16:34.846Z, within the minimumReleaseAge cutoff (2026-08-14T07:37:30.187Z)\n'
+const healYaml = join(TEST_HOME, 'profiles', 'web', 'pnpm-workspace.yaml')
+writeFileSync(healYaml, 'packages:\n  - .\n\nnodeLinker: hoisted\n\nminimumReleaseAgeExclude:\n'
+  + "  - '@deepseek-ai/dsh-credentials@0.1.0-rc.6'\n  - dsh-model-picker@1.0.1\n  - dsh-model-picker@1.0.2\n")
+const healed = mod.healReleaseAgeExclude('web', violationOut)
+const healedYaml = readFileSync(healYaml, 'utf8')
+check('heal merges same-name versions into one union rule',
+  healed.includes('dsh-model-picker@1.0.2') && /dsh-model-picker@1\.0\.1\|\|1\.0\.2/.test(healedYaml)
+  && !healedYaml.includes('- dsh-model-picker@1.0.1\n') && !healedYaml.includes('- dsh-model-picker@1.0.2\n'),
+  healedYaml)
+check('heal preserves unrelated yaml keys', /packages:\n/.test(healedYaml)
+  && /nodeLinker: hoisted/.test(healedYaml)
+  && /'@deepseek-ai\/dsh-credentials@0\.1\.0-rc\.6'/.test(healedYaml), healedYaml)
+check('heal no-ops without the violation marker',
+  mod.healReleaseAgeExclude('web', 'pnpm: network unreachable\n').length === 0
+  && readFileSync(healYaml, 'utf8') === healedYaml, readFileSync(healYaml, 'utf8'))
+writeFileSync(healYaml, 'packages:\n  - .\n')
+const appended = mod.healReleaseAgeExclude('web', violationOut)
+const appendedYaml = readFileSync(healYaml, 'utf8')
+check('heal appends the exclude block when missing', appended.length === 1
+  && /minimumReleaseAgeExclude:\n  - dsh-model-picker@1\.0\.2/.test(appendedYaml), appendedYaml)
 
 // --- parseSimplePatch: hot-mountable patch shape detection ---
 const simplePatch = mod.parseSimplePatch('- insert:\n    - id: tool-csv\n      name: \'@deepseek-ai/dsh-tool-csv\'\n')
@@ -333,6 +388,43 @@ const afterQueue = await call({ method: 'install', source: 'fake:again', profile
 check('new op starts after queue drained', afterQueue.ok && afterQueue.opId, afterQueue)
 const afterDone = await waitForOps((s) => s.op === null && s.history.some((o) => o.id === afterQueue.opId && o.status === 'done'))
 check('post-queue op settles done', !!afterDone, afterDone)
+
+// Supply-chain release-age auto-heal end to end: the CLI fails once with the
+// pnpm minimumReleaseAge violation, the host heals the profile's exclude list
+// and retries the same command, and the op settles done.
+const healBin = join(tmpdir(), 'mkts-heal-bin-' + process.pid + '.mjs')
+const healMarker = healBin + '.runs'
+writeFileSync(healMarker, '0')
+// Seed the profile yaml with an unrelated excluded entry so the heal has to
+// ADD dsh-model-picker (a no-change heal would skip the retry).
+writeFileSync(join(TEST_HOME, 'profiles', 'web', 'pnpm-workspace.yaml'),
+  "packages:\n  - .\n\nminimumReleaseAgeExclude:\n  - '@deepseek-ai/dsh-credentials@0.1.0-rc.6'\n")
+// The spawned CLI derives its marker from its own file path, so the host's
+// automatic retry (same argv, same script) keeps counting on the SAME marker.
+writeFileSync(healBin, `
+import { readFileSync, writeFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+const marker = fileURLToPath(import.meta.url) + '.runs'
+const runs = Number(readFileSync(marker, 'utf8'))
+writeFileSync(marker, String(runs + 1))
+if (runs === 0) {
+  process.stderr.write('[ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION] 1 lockfile entries failed verification:\\n')
+  process.stderr.write('  dsh-model-picker@1.0.2 was published at 2026-08-15T07:16:34.846Z, within the minimumReleaseAge cutoff (2026-08-14T07:37:30.187Z)\\n')
+  process.exit(1)
+}
+process.exit(0)
+`)
+const healCall = await call({ method: 'install', source: 'fake:heal', profile: 'web', binPath: healBin, label: 'heal-me', skipCheck: true })
+check('heal op enqueues', healCall.ok && healCall.opId, healCall)
+const healDone = await waitForOps((s) => s.op === null && s.history.some((o) => o.id === healCall.opId && o.status === 'done'))
+check('heal op auto-retries and settles done', !!healDone, healDone)
+if (healDone) {
+  const healRow = healDone.history.find((o) => o.id === healCall.opId)
+  check('heal op output shows the auto-retry note', /\[auto\]/.test(healRow.output || ''), (healRow.output || '').slice(0, 300))
+  check('heal op ran the CLI twice', readFileSync(healMarker, 'utf8') === '2', readFileSync(healMarker, 'utf8'))
+  const healYamlText = readFileSync(join(TEST_HOME, 'profiles', 'web', 'pnpm-workspace.yaml'), 'utf8')
+  check('heal wrote the union exclude entry', /dsh-model-picker@1\.0\.2/.test(healYamlText), healYamlText)
+}
 
 // Update uses the same queue (then killed to keep the test fast).
 writeFileSync(fakeBin, `setTimeout(() => {}, 60000)\n`)
