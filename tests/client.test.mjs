@@ -37,7 +37,7 @@ const mod = loaded.factory(require)
 if (!mod || !Array.isArray(mod.inject) || typeof mod.apply !== 'function') {
   console.error('FAIL: bad module shape'); process.exit(1)
 }
-if (mod.inject.join(',') !== 'slots') { console.error('FAIL: inject=' + mod.inject); process.exit(1) }
+if (mod.inject.join(',') !== 'slots,sessions,workspaces') { console.error('FAIL: inject=' + mod.inject); process.exit(1) }
 
 let reg = null
 const ctx = {
