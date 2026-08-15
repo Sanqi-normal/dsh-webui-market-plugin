@@ -1,10 +1,22 @@
 // Local harness for lib/host.js: mounts the plugin against a fake webServer and
-// exercises the API surface + op pipeline with a fake CLI bin (no real profile
-// or network install is touched). Run: node --test tests/host.test.mjs
-import { readFileSync, writeFileSync } from 'node:fs'
+// exercises the API surface + op pipeline with a fake CLI bin. DSH_HOME points
+// at a throwaway directory, so no real profile or network install is touched.
+// Run: node --test tests/host.test.mjs
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+const TEST_HOME = mkdtempSync(join(tmpdir(), 'dsh-mkts-home-'))
+mkdirSync(join(TEST_HOME, 'profiles', 'web'), { recursive: true })
+writeFileSync(join(TEST_HOME, 'profiles', 'web', 'package.json'), JSON.stringify({
+  name: 'dsh-profile-web',
+  private: true,
+  dependencies: { 'fake-installed': '^1.0.0' },
+  dsh: { profile: { bundles: ['fake-installed', 'builtin-bundle'] } },
+}, null, 2) + '\n')
+process.env.DSH_HOME = TEST_HOME
+
 const mod = await import('../lib/host.js')
 
 let handler = null
@@ -48,19 +60,37 @@ function skip(name) {
   console.log('SKIP ' + name + ' (network unavailable)')
   skipped++
 }
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+async function waitForOps(predicate, timeoutMs = 8000) {
+  const until = Date.now() + timeoutMs
+  while (Date.now() < until) {
+    const snap = await call({ method: 'op' })
+    if (predicate(snap)) return snap
+    await sleep(120)
+  }
+  return null
+}
 
 // --- read-only API surface ---
 // dshBin auto-detection keys off the web server's cwd (the harness checkout);
 // under the test runner the cwd is this repo, so pin the DSH_BIN fallback.
 process.env.DSH_BIN = process.execPath
 const probe = await call({ method: 'probe' })
-check('probe env', probe.ok && probe.dshHome && probe.node && probe.dshBin, probe)
+check('probe env', probe.ok && probe.dshHome === TEST_HOME && probe.node && probe.dshBin, probe)
 
 const inst = await call({ method: 'installed' })
-check('installed shape', inst.ok && Array.isArray(inst.bundles) && typeof inst.dependencies === 'object', inst)
+check('installed shape', inst.ok && Array.isArray(inst.bundles) && typeof inst.dependencies === 'object' && Array.isArray(inst.disabled), inst)
+
+const all = await call({ method: 'installedAll' })
+check('installedAll lists dep + builtin', all.ok
+  && Array.isArray(all.plugins) && all.plugins.some((p) => p.name === 'fake-installed')
+  && Array.isArray(all.builtin) && all.builtin.includes('builtin-bundle'), all)
 
 const emptyOp = await call({ method: 'op' })
-check('op empty -> null', emptyOp.ok && emptyOp.op === null, emptyOp)
+check('op empty -> null queue/history', emptyOp.ok && emptyOp.op === null
+  && Array.isArray(emptyOp.queue) && emptyOp.queue.length === 0
+  && Array.isArray(emptyOp.history) && emptyOp.history.length === 0, emptyOp)
 
 const list = await call({ method: 'list', lang: 'zh' })
 if (!list.ok) skip('list zh (real site)')
@@ -83,8 +113,6 @@ const registrySpec = await mod.classifyPlugin('@some/pkg')
 check('classify registry spec unknown', registrySpec.known === false && registrySpec.webClient === false, registrySpec)
 
 // --- probe (fake bin emulates install + boot) ---
-// A fake bin in "boot mode" (invoked with --port, no plugin subcommand) prints
-// the dsh web: readiness line; otherwise it behaves like the CLI install.
 const probeBin = join(tmpdir(), 'mkts-probe-bin-' + process.pid + '.mjs')
 writeFileSync(probeBin, `
 const isBoot = !process.argv.includes('plugin') && process.argv.includes('--port')
@@ -98,8 +126,6 @@ process.exit(0)
 const probeOk = await mod.runProbe(probeBin, 'fake:ok')
 check('probe passes on readiness line', probeOk.ok === true, probeOk)
 
-// A fake bin whose install step succeeds but whose boot step fails without
-// printing the readiness line → boot verdict fails with the boot error.
 writeFileSync(probeBin, `
 const isBoot = !process.argv.includes('plugin') && process.argv.includes('--port')
 if (isBoot) {
@@ -112,7 +138,6 @@ process.exit(0)
 const probeFail = await mod.runProbe(probeBin, 'fake:bad')
 check('probe fails on boot error', probeFail.ok === false && probeFail.stage === 'boot' && /BOOT ERROR/.test(probeFail.output || ''), probeFail)
 
-// A fake bin that fails at the install step → install stage verdict.
 writeFileSync(probeBin, `process.stdout.write('pnpm: network unreachable\\n')\nprocess.exit(1)\n`)
 const probeInstallFail = await mod.runProbe(probeBin, 'fake:neterr')
 check('probe fails on install error', probeInstallFail.ok === false && probeInstallFail.stage === 'install' && /pnpm/.test(probeInstallFail.output || ''), probeInstallFail)
@@ -124,19 +149,21 @@ check('install rejected cross-origin', crossOrigin.ok === false && /untrusted/.t
 const crossKill = await call({ method: 'kill' }, { origin: 'http://evil.example' })
 check('kill rejected cross-origin', crossKill.ok === false && /untrusted/.test(crossKill.error || ''), crossKill)
 
+const crossToggle = await call({ method: 'disable', name: 'fake-installed', profile: 'web' }, { origin: 'http://evil.example' })
+check('disable rejected cross-origin', crossToggle.ok === false && /untrusted/.test(crossToggle.error || ''), crossToggle)
+
 // --- source whitelist (curated catalog only) ---
 const notListed = await call({ method: 'install', source: 'github:somebody/not-in-catalog', profile: 'web', binPath: process.execPath })
-check('install rejected when not in curated catalog', notListed.ok === false && notListed.refused === true && /精选目录/.test(notListed.output || ''), notListed)
+check('install enqueued (whitelist now checked at queue head)', notListed.ok === true && notListed.opId, notListed)
+const notListedDone = await waitForOps((s) => (s.op === null) && s.history.some((o) => o.id === notListed.opId && o.status === 'refused'))
+check('whitelist refusal settles in op history', !!notListedDone && /精选目录/.test((notListedDone.history.find((o) => o.id === notListed.opId) || {}).output || ''), notListedDone)
 
-// A github: source that IS in the catalog passes the whitelist (then the probe
-// path would run; skipCheck bypasses to keep this fast and offline-safe).
 const wlBin = join(tmpdir(), 'mkts-wl-bin-' + process.pid + '.mjs')
 writeFileSync(wlBin, `process.exit(0)\n`)
 const listedOk = await call({ method: 'install', source: 'github:huiliyi37/dsh-tianshu-tui', profile: 'web', binPath: wlBin, skipCheck: true })
-check('catalog-listed github source passes whitelist', listedOk.ok === true && listedOk.opId, listedOk)
-await call({ method: 'kill' }) // cancel the started op
+check('catalog-listed github source enqueues', listedOk.ok === true && listedOk.opId, listedOk)
+await call({ method: 'kill' })
 
-// whitelistSource unit-level: registry/link specs are not gated.
 const wl = await mod.whitelistSource('@some/pkg', [{ source: 'github:a/b' }])
 check('whitelist ignores registry spec', wl.allowed === true, wl)
 
@@ -224,11 +251,10 @@ check('update rejected cross-origin', updCross.ok === false && /untrusted/.test(
 const updNotInstalled = await call({ method: 'update', name: 'not-installed-pkg', profile: 'web', binPath: process.execPath })
 check('update rejects not-installed', updNotInstalled.ok === false && /未安装/.test(updNotInstalled.output || ''), updNotInstalled)
 
-// checkUpdates degrades gracefully with no real profile / lockfile.
 const cu = await mod.checkUpdates('__no_such_profile__')
 check('checkUpdates degrades on missing profile', typeof cu === 'object' && Object.keys(cu).length === 0, cu)
 
-// --- op pipeline with a fake CLI bin (never touches the real profile) ---
+// --- queue pipeline with a fake CLI bin (never touches the real profile) ---
 const fakeBin = join(tmpdir(), 'mkts-fake-bin-' + process.pid + '.mjs')
 writeFileSync(fakeBin, `
 const isBoot = !process.argv.includes('plugin') && process.argv.includes('--port')
@@ -240,47 +266,108 @@ process.stdout.write('fake-bin running\\n')
 process.stderr.write('fake-bin stderr line\\n')
 setTimeout(() => { process.exit(0) }, 400)
 `)
-// args: node <bin> plugin --profile <p> add <t>  -> fake bin receives all args.
 const opCall = await call({ method: 'install', source: 'fake:test', profile: 'web', binPath: fakeBin, label: 'fake plugin' })
-check('install starts op', opCall.ok && opCall.opId, opCall)
+check('install enqueues and starts op', opCall.ok && opCall.opId, opCall)
 
-await new Promise((r) => setTimeout(r, 900))
-const opState = await call({ method: 'op' })
-check('op settles done with output', opState.ok && opState.op && opState.op.status === 'done' && /fake-bin running/.test(opState.op.output), opState.op && opState.op)
+const firstSnap = await call({ method: 'op' })
+check('first op is live (running/checking)', firstSnap.ok && firstSnap.op && (firstSnap.op.status === 'running' || firstSnap.op.status === 'checking'), firstSnap)
 
-const opId = opState.op.id
-const opById = await call({ method: 'op', opId })
-check('op by id matches', opById.ok && opById.op && opById.op.id === opId, opById)
+// Queueing: a second different op is accepted while the first is still live.
+const op2Call = await call({ method: 'install', source: 'fake:test2', profile: 'web', binPath: fakeBin, label: 'second fake', skipCheck: true })
+check('second install is queued behind the first', op2Call.ok && op2Call.opId, op2Call)
+const queuedSnap = await call({ method: 'op' })
+check('queue reports the pending op', queuedSnap.ok && queuedSnap.op && queuedSnap.queue.some((o) => o.id === op2Call.opId && o.status === 'pending'), queuedSnap)
 
-// kill path: start a long-running fake bin, then kill.
-// skipCheck: true skips the trial-boot probe so the op starts immediately.
+// Duplicate live/pending target is refused (no self-race).
+const dupCall = await call({ method: 'install', source: 'fake:test2', profile: 'web', binPath: fakeBin, label: 'dup', skipCheck: true })
+check('duplicate target refused while queued', dupCall.ok === false && dupCall.busy === true, dupCall)
+
+const bothDone = await waitForOps((s) => s.op === null && s.history.filter((o) => o.id === opCall.opId || o.id === op2Call.opId).length === 2)
+check('both queued ops settle done in FIFO order', !!bothDone, bothDone)
+if (bothDone) {
+  const order = bothDone.history.filter((o) => o.id === opCall.opId || o.id === op2Call.opId)
+  // history is newest-first, so FIFO completion shows as [second, first].
+  check('FIFO order: first op settled before second', order.length === 2 && order[0].id === op2Call.opId && order[1].id === opCall.opId, order.map((o) => o.id + ':' + o.status))
+  const opById = await call({ method: 'op', opId: opCall.opId })
+  check('op by id matches after settle', opById.ok && opById.op && opById.op.id === opCall.opId && opById.op.status === 'done', opById)
+}
+
+// kill path: cancel a queued op and kill the live one.
 writeFileSync(fakeBin, `setTimeout(() => {}, 60000)\n`)
-const op2 = await call({ method: 'install', source: 'fake:slow', profile: 'web', binPath: fakeBin, label: 'slow', skipCheck: true })
-check('second install starts (first settled)', op2.ok && op2.opId, op2)
-await new Promise((r) => setTimeout(r, 300))
-const k = await call({ method: 'kill' })
-check('kill requested', k.ok, k)
-await new Promise((r) => setTimeout(r, 600))
-const opAfterKill = await call({ method: 'op', opId: op2.opId })
-check('op status killed', opAfterKill.ok && opAfterKill.op && opAfterKill.op.status === 'killed', opAfterKill)
+const slow1 = await call({ method: 'install', source: 'fake:slow1', profile: 'web', binPath: fakeBin, label: 'slow1', skipCheck: true })
+check('slow op 1 starts', slow1.ok && slow1.opId, slow1)
+const slow2 = await call({ method: 'install', source: 'fake:slow2', profile: 'web', binPath: fakeBin, label: 'slow2', skipCheck: true })
+check('slow op 2 queues', slow2.ok && slow2.opId, slow2)
+await sleep(200)
+const toggleBusy = await call({ method: 'disable', name: 'fake-installed', profile: 'web' })
+check('disable refused while queue busy', toggleBusy.ok === false && toggleBusy.busy === true, toggleBusy)
+const cancelQueued = await call({ method: 'kill', opId: slow2.opId })
+check('queued op cancelled by id', cancelQueued.ok === true, cancelQueued)
+const queuedKilled = await call({ method: 'op', opId: slow2.opId })
+check('cancelled op status killed', queuedKilled.ok && queuedKilled.op && queuedKilled.op.status === 'killed', queuedKilled)
 
-// busy refusal while an op is still live
+const killLive = await call({ method: 'kill' })
+check('live op killed', killLive.ok, killLive)
+const liveKilled = await waitForOps((s) => s.op === null && s.history.some((o) => o.id === slow1.opId && o.status === 'killed'))
+check('live op settles killed', !!liveKilled, liveKilled)
+
+// After the queue drains a new op starts normally again.
+writeFileSync(fakeBin, `setTimeout(() => { process.exit(0) }, 300)\n`)
+const afterQueue = await call({ method: 'install', source: 'fake:again', profile: 'web', binPath: fakeBin, label: 'again', skipCheck: true })
+check('new op starts after queue drained', afterQueue.ok && afterQueue.opId, afterQueue)
+const afterDone = await waitForOps((s) => s.op === null && s.history.some((o) => o.id === afterQueue.opId && o.status === 'done'))
+check('post-queue op settles done', !!afterDone, afterDone)
+
+// Update uses the same queue (then killed to keep the test fast).
 writeFileSync(fakeBin, `setTimeout(() => {}, 60000)\n`)
-const op3 = await call({ method: 'install', source: 'fake:slow2', profile: 'web', binPath: fakeBin, label: 'slow2', skipCheck: true })
-check('third op starts', op3.ok && op3.opId, op3)
-await new Promise((r) => setTimeout(r, 200))
-const busy = await call({ method: 'install', source: 'github:x/y', profile: 'web', binPath: fakeBin, label: 'dup' })
-check('busy while op live', busy.ok === false && busy.busy === true, busy)
-await call({ method: 'kill' })
+const updQueued = await call({ method: 'update', name: 'fake-installed', profile: 'web', binPath: fakeBin })
+check('update enqueues via the queue', updQueued.ok && updQueued.opId, updQueued)
+const updKill = await call({ method: 'kill' })
+check('queued update killed', updKill.ok, updKill)
 
 // uninstall: hot-mount dispose is a no-op when no live mount exists, and the
 // remove op still starts normally (fake bin exits 0).
 writeFileSync(fakeBin, `setTimeout(() => { process.exit(0) }, 300)\n`)
-const uninstCall = await call({ method: 'uninstall', pkg: 'whale-girl', profile: 'web', binPath: fakeBin, label: 'whale-girl' })
-check('uninstall starts op (dispose no-op safe)', uninstCall.ok === true && uninstCall.opId, uninstCall)
-await new Promise((r) => setTimeout(r, 500))
-const uninstOp = await call({ method: 'op', opId: uninstCall.opId })
-check('uninstall op settles done', uninstOp.ok && uninstOp.op && uninstOp.op.status === 'done', uninstOp)
+const uninstCall = await call({ method: 'uninstall', pkg: 'fake-installed', profile: 'web', binPath: fakeBin, label: 'fake-installed' })
+check('uninstall enqueues (dispose no-op safe)', uninstCall.ok === true && uninstCall.opId, uninstCall)
+const uninstOp = await waitForOps((s) => s.op === null && s.history.some((o) => o.id === uninstCall.opId && o.status === 'done'))
+check('uninstall op settles done', !!uninstOp, uninstOp)
+
+// --- disable / enable (dormant switch) ---
+const disable = await call({ method: 'disable', name: 'fake-installed', profile: 'web' })
+check('disable returns ok + disabled list', disable.ok === true && Array.isArray(disable.disabled) && disable.disabled.includes('fake-installed'), disable)
+let manifest = JSON.parse(readFileSync(join(TEST_HOME, 'profiles', 'web', 'package.json'), 'utf8'))
+check('disable removes bundle but keeps dependency', manifest.dependencies['fake-installed'] !== undefined
+  && !manifest.dsh.profile.bundles.includes('fake-installed'), manifest)
+check('disable persists dsh.market.disabled', Array.isArray(manifest.dsh.market.disabled)
+  && manifest.dsh.market.disabled.some((e) => e.name === 'fake-installed'), manifest.dsh.market)
+
+const installedDisabled = await call({ method: 'installed' })
+check('installed reports disabled names', Array.isArray(installedDisabled.disabled) && installedDisabled.disabled.includes('fake-installed'), installedDisabled)
+
+const disabledUnit = mod.setDisabledState('web', 'not-installed-xyz', true)
+check('disable unknown name rejected', disabledUnit.ok === false, disabledUnit)
+
+const enable = await call({ method: 'enable', name: 'fake-installed', profile: 'web' })
+check('enable returns ok', enable.ok === true && (!Array.isArray(enable.disabled) || !enable.disabled.includes('fake-installed')), enable)
+manifest = JSON.parse(readFileSync(join(TEST_HOME, 'profiles', 'web', 'package.json'), 'utf8'))
+check('enable restores bundle at original index', manifest.dsh.profile.bundles[0] === 'fake-installed'
+  && manifest.dsh.profile.bundles[1] === 'builtin-bundle', manifest.dsh.profile.bundles)
+check('enable clears dsh.market.disabled', !Array.isArray(manifest.dsh.market.disabled) || manifest.dsh.market.disabled.length === 0, manifest.dsh.market)
+
+const enableUnknown = mod.setDisabledState('web', 'also-not-installed', false)
+check('enable unknown name rejected', enableUnknown.ok === false, enableUnknown)
+
+// reapplyDisabledState guard: reconcile re-added a disabled bundle, reapply drops it.
+manifest = JSON.parse(readFileSync(join(TEST_HOME, 'profiles', 'web', 'package.json'), 'utf8'))
+manifest.dsh.profile.bundles = ['fake-installed', 'builtin-bundle']
+manifest.dsh.market = { disabled: [{ name: 'fake-installed', index: 0 }] }
+writeFileSync(join(TEST_HOME, 'profiles', 'web', 'package.json'), JSON.stringify(manifest, null, 2) + '\n')
+const reapply = await call({ method: 'install', source: 'fake:reapply', profile: 'web', binPath: fakeBin, label: 'reapply', skipCheck: true })
+await waitForOps((s) => s.op === null && s.history.some((o) => o.id === reapply.opId && o.status === 'done'))
+manifest = JSON.parse(readFileSync(join(TEST_HOME, 'profiles', 'web', 'package.json'), 'utf8'))
+check('reapply keeps disabled bundle out after a market op', !manifest.dsh.profile.bundles.includes('fake-installed'), manifest.dsh.profile.bundles)
+await call({ method: 'enable', name: 'fake-installed', profile: 'web' })
 
 const tail = skipped > 0 ? ' (' + skipped + ' skipped)' : ''
 console.log(failures === 0 ? 'ALL PASS' + tail : failures + ' FAILURES' + tail)

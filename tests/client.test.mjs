@@ -60,6 +60,105 @@ if (reg.opts.id !== 'market' || reg.opts.order !== 5) { console.error('FAIL: bad
 if (typeof reg.Component !== 'function') { console.error('FAIL: Component not a function'); process.exit(1) }
 console.log('PASS client module shape + apply registers market tab (id=market, order=5)')
 
+// Render smoke: execute MarketPanel once with the stub hooks. This catches
+// ReferenceErrors in the new queue/local/batch-render code paths without a
+// real React runtime.
+try {
+  const tree = reg.Component()
+  if (!tree || tree.tag !== 'el') throw new Error('unexpected tree ' + JSON.stringify(tree))
+  console.log('PASS client MarketPanel renders a loading tree without runtime errors')
+} catch (e) {
+  console.error('FAIL client MarketPanel render smoke: ' + String((e && e.stack) || e))
+  process.exit(1)
+}
+
+// Ready-state render smoke: re-evaluate the exact client source with a stub
+// whose useState hands out a prepared ready catalog (installed + disabled +
+// update-available cards), then render MarketPanel. This walks the card
+// actions, disabled badge, update chip and batch-render branches.
+{
+  const initialStates = [
+    { // data
+      phase: 'ready',
+      plugins: [
+        {
+          cat: 'ui', name: 'dsh-tianshu-tui', url: 'https://github.com/huiliyi37/dsh-tianshu-tui',
+          by: 'huiliyi37', desc: 'TUI', profile: 'web', source: 'github:huiliyi37/dsh-tianshu-tui',
+          stars: 12, added: '2026-08-13', cmd: 'dsh plugin --profile web add github:huiliyi37/dsh-tianshu-tui',
+        },
+        {
+          cat: 'ui', name: 'DSH-better-sidebar', url: 'https://github.com/omdsh-dev/DSH-better-sidebar',
+          by: 'omdsh-dev', desc: 'Sidebar', profile: 'web', source: 'github:omdsh-dev/DSH-better-sidebar',
+          stars: null, added: null, cmd: 'dsh plugin --profile web add github:omdsh-dev/DSH-better-sidebar',
+        },
+      ],
+      cats: [{ id: 'all', count: 2 }, { id: 'ui', label: 'UI', count: 2 }],
+      installed: {
+        web: {
+          dependencies: { 'dsh-tianshu-tui': 'github:huiliyi37/dsh-tianshu-tui', 'dsh-better-sidebar': '^1.0.0' },
+          bundles: ['dsh-tianshu-tui'], disabled: ['dsh-better-sidebar'],
+        },
+      },
+      updates: { web: { 'dsh-tianshu-tui': { kind: 'github', version: '1.0.0', current: 'aaa', latest: 'bbb', updateAvailable: true } } },
+      error: null,
+    },
+    { dshHome: '/tmp/dsh', dshBin: 'bin', node: 'node' }, // envInfo
+    '', // binPath
+    '', // query
+    'all', // cat
+    false, // showInstalled
+    'default', // sortBy
+    null, // open
+    null, // op confirm
+    [], // ops queue
+    true, // queueOpen
+    null, // notice
+    null, // local
+    false, // localOpen
+    60, // visibleCount
+  ]
+  let hookIndex = 0
+  const ReactReady = {
+    createElement: (...a) => ({ tag: 'el', args: a }),
+    useState: () => [initialStates[hookIndex++], () => {}],
+    useEffect: () => {},
+    useRef: (v) => ({ current: v }),
+  }
+  let loadedReady = null
+  globalThis.window = { __ModuleLoader__: { load: (handoff) => { loadedReady = handoff } } }
+  new Function('require', src + '\n;return typeof module !== "undefined" ? module.exports : undefined')((spec) => {
+    if (spec === 'react') return ReactReady
+    throw new Error('unexpected require: ' + spec)
+  })
+  const modReady = loadedReady.factory((spec) => {
+    if (spec === 'react') return ReactReady
+    throw new Error('unexpected require: ' + spec)
+  })
+  let regReady = null
+  modReady.apply({
+    get(name) {
+      if (name === 'slots') {
+        return {
+          inject(key, cb) { if (key === 'settings.plugins.tab') regReady = cb() },
+          register(opts, Component) { return { opts, Component } },
+        }
+      }
+      return undefined
+    },
+    effect(fn) { return fn() },
+  })
+  if (!regReady || typeof regReady.Component !== 'function') { console.error('FAIL: ready-state tab not registered'); process.exit(1) }
+  try {
+    hookIndex = 0
+    const tree = regReady.Component()
+    if (!tree || tree.tag !== 'el') throw new Error('unexpected tree ' + JSON.stringify(tree))
+    console.log('PASS client MarketPanel renders ready catalog + disabled/update cards without runtime errors')
+  } catch (e) {
+    console.error('FAIL client ready-state render smoke: ' + String((e && e.stack) || e))
+    process.exit(1)
+  }
+}
+
 // --- installedPkgName: case-insensitive repo/key matching (issue #1) ---
 // installedPkgName is a closure inside the bundle factory, so extract its
 // exact source text (together with the two helpers it calls) and evaluate it
