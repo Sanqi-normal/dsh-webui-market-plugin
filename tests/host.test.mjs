@@ -376,6 +376,14 @@ if (bothDone) {
   check('cleared op no longer returned by id', clearedById.ok && clearedById.op === null, clearedById)
   const clearedSnap = await call({ method: 'op' })
   check('cleared op removed from history snapshot', !clearedSnap.history.some((o) => o.id === opCall.opId), clearedSnap.history)
+
+  // "清空" clears every finished op at once, persisted host-side.
+  const clearAllCross = await call({ method: 'clearAll' }, { origin: 'http://evil.example' })
+  check('clearAll rejected cross-origin', clearAllCross.ok === false && /untrusted/.test(clearAllCross.error || ''), clearAllCross)
+  const clearAllRes = await call({ method: 'clearAll' })
+  check('clearAll ok + returns count', clearAllRes.ok === true && typeof clearAllRes.count === 'number', clearAllRes)
+  const clearAllSnap = await call({ method: 'op' })
+  check('clearAll empties finished history', clearAllSnap.ok && clearAllSnap.history.length === 0, clearAllSnap.history)
 }
 
 // kill path: cancel a queued op and kill the live one.

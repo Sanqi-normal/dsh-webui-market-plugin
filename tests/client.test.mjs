@@ -159,6 +159,88 @@ try {
   }
 }
 
+// Local-list + queue "清空" render smoke: with localOpen true and a finished
+// op in the queue, the panel must render every dependency-managed plugin
+// (including non-bundle/out-of-catalog ones) and the clear-all button.
+{
+  const initialStates = [
+    { // data
+      phase: 'ready',
+      plugins: [
+        {
+          cat: 'ui', name: 'dsh-tianshu-tui', url: 'https://github.com/huiliyi37/dsh-tianshu-tui',
+          by: 'huiliyi37', desc: 'TUI', profile: 'web', source: 'github:huiliyi37/dsh-tianshu-tui',
+          stars: 12, added: '2026-08-13', cmd: 'dsh plugin --profile web add github:huiliyi37/dsh-tianshu-tui',
+        },
+      ],
+      cats: [{ id: 'all', count: 1 }],
+      installed: { web: { dependencies: { 'dsh-tianshu-tui': 'github:huiliyi37/dsh-tianshu-tui' }, bundles: ['dsh-tianshu-tui'], disabled: [] } },
+      updates: { web: {} },
+      error: null,
+    },
+    { dshHome: '/tmp/dsh', dshBin: 'bin', node: 'node' }, // envInfo
+    '', // binPath
+    '', // query
+    'all', // cat
+    false, // showInstalled
+    'default', // sortBy
+    null, // open
+    null, // op confirm
+    [{ id: 'op-1', kind: 'install', profile: 'web', target: 'x', label: 'x', status: 'done', output: '', exitCode: 0, hot: false, elapsedMs: 0, timeoutMs: 120000, startedAt: Date.now() }], // ops
+    true, // queueOpen
+    null, // notice
+    { plugins: [
+      { name: 'bundle-plugin', spec: 'github:a/b', repo: 'a/b', version: '1.0.0', kind: 'github', isBundle: true, inBundles: true, disabled: false, inCatalog: true },
+      { name: 'external-dep', spec: 'github:c/d', repo: 'c/d', version: null, kind: 'github', isBundle: false, inBundles: false, disabled: false, inCatalog: false },
+    ], builtin: [] }, // local
+    true, // localOpen
+    60, // visibleCount
+  ]
+  let hookIndex = 0
+  const ReactLocal = {
+    createElement: (...a) => ({ tag: 'el', args: a }),
+    useState: () => [initialStates[hookIndex++], () => {}],
+    useEffect: () => {},
+    useRef: (v) => ({ current: v }),
+  }
+  let loadedLocal = null
+  globalThis.window = { __ModuleLoader__: { load: (handoff) => { loadedLocal = handoff } } }
+  new Function('require', src + '\n;return typeof module !== "undefined" ? module.exports : undefined')((spec) => {
+    if (spec === 'react') return ReactLocal
+    throw new Error('unexpected require: ' + spec)
+  })
+  const modLocal = loadedLocal.factory((spec) => {
+    if (spec === 'react') return ReactLocal
+    throw new Error('unexpected require: ' + spec)
+  })
+  let regLocal = null
+  modLocal.apply({
+    get(name) {
+      if (name === 'slots') {
+        return {
+          inject(key, cb) { if (key === 'settings.plugins.tab') regLocal = cb() },
+          register(opts, Component) { return { opts, Component } },
+        }
+      }
+      return undefined
+    },
+    effect(fn) { return fn() },
+  })
+  if (!regLocal || typeof regLocal.Component !== 'function') { console.error('FAIL: local-state tab not registered'); process.exit(1) }
+  try {
+    hookIndex = 0
+    const tree = regLocal.Component()
+    const hasExternal = JSON.stringify(tree).includes('external-dep')
+    const hasClearAll = JSON.stringify(tree).includes('清空')
+    if (!tree || tree.tag !== 'el') throw new Error('unexpected tree ' + JSON.stringify(tree))
+    if (!hasExternal || !hasClearAll) throw new Error('local/external or clear-all not rendered: external=' + hasExternal + ' clearAll=' + hasClearAll)
+    console.log('PASS client MarketPanel renders all local plugins + queue clear-all button')
+  } catch (e) {
+    console.error('FAIL client local/queue render smoke: ' + String((e && e.stack) || e))
+    process.exit(1)
+  }
+}
+
 // --- installedPkgName: case-insensitive repo/key matching (issue #1) ---
 // installedPkgName is a closure inside the bundle factory, so extract its
 // exact source text (together with the two helpers it calls) and evaluate it
@@ -252,4 +334,40 @@ checkMatch('repoPathOf null for version range',
   repoPathOf('^1.0.0') === null, repoPathOf('^1.0.0'))
 checkMatch('repoPathOf null for relative path',
   repoPathOf('../foo/bar') === null, repoPathOf('../foo/bar'))
+
+// localFromInstalled: the fallback for old hosts without `installedAll` must
+// still list every dependency-managed plugin, including non-bundle external
+// deps, and mark catalog membership using the same identity rules.
+const localFromInstalled = new Function(
+  extractFunction(src, 'repoNameOf') + '\n' +
+  extractFunction(src, 'repoOfValue') + '\n' +
+  extractFunction(src, 'repoPathOf') + '\n' +
+  extractFunction(src, 'installedPkgName') + '\n' +
+  extractFunction(src, 'localFromInstalled') + '\n; return localFromInstalled',
+)()
+const fallbackLocal = localFromInstalled({
+  dependencies: {
+    'github-dep': 'github:Jesse-njx/dsh-memory',
+    'fake-installed': '^1.0.0',
+    'other-dep': 'github:someone/else',
+  },
+  bundles: ['fake-installed', 'builtin-bundle'],
+  disabled: ['fake-installed'],
+  repos: { 'github-dep': 'jesse-njx/dsh-memory', 'fake-installed': null, 'other-dep': 'someone/else' },
+}, [
+  { url: 'https://github.com/Jesse-njx/dsh-memory' },
+  { url: 'https://github.com/other/dsh-memory' },
+])
+checkMatch('localFromInstalled lists non-bundle external dep',
+  fallbackLocal.plugins.some((p) => p.name === 'github-dep' && p.inBundles === false && p.inCatalog === true),
+  fallbackLocal.plugins)
+checkMatch('localFromInstalled keeps bundle deps and disabled state',
+  fallbackLocal.plugins.some((p) => p.name === 'fake-installed' && p.inBundles === true && p.disabled === true),
+  fallbackLocal.plugins)
+checkMatch('localFromInstalled builtin from bundles without deps',
+  Array.isArray(fallbackLocal.builtin) && fallbackLocal.builtin.includes('builtin-bundle'),
+  fallbackLocal.builtin)
+checkMatch('localFromInstalled marks non-catalog dep external',
+  fallbackLocal.plugins.some((p) => p.name === 'other-dep' && p.inCatalog === false),
+  fallbackLocal.plugins)
 if (matchFailures > 0) process.exit(1)
