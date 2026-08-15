@@ -1,7 +1,7 @@
 {
   "name": "@sanqi-normal/dsh-webui-market-plugin",
   "description": "In-harness community plugin market for the dsh web GUI: browse awesome-dsh-plugin.com, install and uninstall plugins into a profile",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "type": "module",
   "main": "lib/host.js",
   "exports": {
