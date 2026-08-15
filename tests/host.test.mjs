@@ -311,6 +311,21 @@ check('update rejects not-installed', updNotInstalled.ok === false && /未安装
 const cu = await mod.checkUpdates('__no_such_profile__')
 check('checkUpdates degrades on missing profile', typeof cu === 'object' && Object.keys(cu).length === 0, cu)
 
+// --- update target construction: pin github updates to the detected commit SHA ---
+check('github update target pins detected SHA',
+  mod.updateTargetFor('github:vlln/dsh-navbar#old', 'x', '6e23640bd60c0157043ae5c29a6d80034287b41b')
+    === 'github:vlln/dsh-navbar#6e23640bd60c0157043ae5c29a6d80034287b41b',
+  mod.updateTargetFor('github:vlln/dsh-navbar#old', 'x', '6e23640bd60c0157043ae5c29a6d80034287b41b'))
+check('github update target falls back to unpinned when SHA unknown',
+  mod.updateTargetFor('github:vlln/dsh-navbar', 'x', null) === 'github:vlln/dsh-navbar',
+  mod.updateTargetFor('github:vlln/dsh-navbar', 'x', null))
+check('github update target strips .git before pinning',
+  mod.updateTargetFor('github:vlln/dsh-navbar.git', 'x', '6e23640bd60c0157043ae5c29a6d80034287b41b')
+    === 'github:vlln/dsh-navbar#6e23640bd60c0157043ae5c29a6d80034287b41b',
+  mod.updateTargetFor('github:vlln/dsh-navbar.git', 'x', '6e23640bd60c0157043ae5c29a6d80034287b41b'))
+check('npm update target uses name@latest', mod.updateTargetFor('^1.0.0', 'fake-installed', '1.2.0') === 'fake-installed@latest',
+  mod.updateTargetFor('^1.0.0', 'fake-installed', '1.2.0'))
+
 // --- queue pipeline with a fake CLI bin (never touches the real profile) ---
 const fakeBin = join(tmpdir(), 'mkts-fake-bin-' + process.pid + '.mjs')
 writeFileSync(fakeBin, `
