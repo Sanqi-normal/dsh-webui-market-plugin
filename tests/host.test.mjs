@@ -248,6 +248,11 @@ check('updates route ok', updates.ok === true && typeof updates.updates === 'obj
 const updCross = await call({ method: 'update', name: 'fake:pkg', profile: 'web' }, { origin: 'http://evil.example' })
 check('update rejected cross-origin', updCross.ok === false && /untrusted/.test(updCross.error || ''), updCross)
 
+const updAllCross = await call({ method: 'updateAll', profile: 'web' }, { origin: 'http://evil.example' })
+check('updateAll rejected cross-origin', updAllCross.ok === false && /untrusted/.test(updAllCross.error || ''), updAllCross)
+const updAll = await call({ method: 'updateAll', profile: 'web' })
+check('updateAll returns ok + opId list', updAll.ok === true && typeof updAll.count === 'number' && Array.isArray(updAll.opIds), updAll)
+
 const updNotInstalled = await call({ method: 'update', name: 'not-installed-pkg', profile: 'web', binPath: process.execPath })
 check('update rejects not-installed', updNotInstalled.ok === false && /未安装/.test(updNotInstalled.output || ''), updNotInstalled)
 

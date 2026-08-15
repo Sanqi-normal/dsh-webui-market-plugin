@@ -42,8 +42,8 @@ GitHub 源安装会执行包内 prepare 脚本，如被 pnpm 拦截，把提示�
 
 - 目录按分类分组，支持搜索与"已安装"过滤；每个卡片显示 GitHub Star 数（无数据不显示），可一键按 **最热（Star 降序，无 Star 的排最后）/ 最新（收录日期）** 排序，或恢复官网默认顺序；大目录分批渐进渲染，避免打开瞬间一次性插入数百卡片造成卡顿
 - 点 **详情** 查看该插件的官方安装命令（含目标 profile）
-- **安装 / 更新 / 卸载** 组成 FIFO 任务队列：多个插件可以连续排队提交，任务面板实时显示「排队中 / 校验中 / 执行中 / 完成 / 失败 / 已终止 / 超时」，可取消排队项、终止执行项、查看每个任务的 pnpm 日志；每个任务超过 120 秒自动超时
-- **停用 / 启用**：停用保留依赖与磁盘文件，只把插件移出激活的 bundle 层（重启后仍保持停用）；启用按原顺序恢复，免删装
+- **安装 / 更新 / 卸载** 组成 FIFO 任务队列：多个插件可以连续排队提交，任务面板固定在右下角、不随页面滚动隐藏，实时显示「排队中 / 校验中 / 执行中 / 完成 / 失败 / 已终止 / 超时」，可取消排队项、终止执行项、查看每个任务的 pnpm 日志；每个任务超过 120 秒自动超时；**一键更新全部**会把所有可更新插件依次加入队列
+- **停用 / 启用**：停用保留依赖与磁盘文件，只把插件移出激活的 bundle 层（重启后仍保持停用）；启用按原顺序恢复，免删装；卡片操作区横向排列在卡片底部，避免右侧按钮拥挤
 - **本机插件**：列出所有由依赖管理的插件（含在市场之外安装的），标注目录内/目录外、已停用、来源类型，可直接停用、启用或卸载（内置 bundle 与本地 link/file 源不会提供删除）
 - 每个插件卡片显示真实的已安装状态（与 profile 的 `package.json` 同步）
 - 顶部显示插件目录来源官网链接，可直接打开
@@ -54,7 +54,7 @@ GitHub 源安装会执行包内 prepare 脚本，如被 pnpm 拦截，把提示�
 
 持久化 bundle（`package.json` 的 `dsh.bundle.patch` → `cordis.patch.yml`），由 `dsh plugin add` 的 reconcile 自动加入 profile 的 `dsh.profile.bundles` 层：
 
-- **Host 半**（`lib/host.js`）：注册 `/api/dsh-market` 路由，提供 `list`（读取官网 JSON API `plugins.json`，失败回退静态页解析 / 离线快照，含 stars/added）、`probe`（环境探测）、`installed` / `installedAll`（读取 profile package.json 与已装包 manifest）、`install` / `update` / `uninstall`（FIFO 队列 + 后台 spawn `dsh plugin` CLI，白名单与试装验证在队列头执行）、`disable` / `enable`（停用/启用并持久化到 `dsh.market.disabled`）、`op`（队列快照）、`kill`（终止/取消任务）
+- **Host 半**（`lib/host.js`）：注册 `/api/dsh-market` 路由，提供 `list`（读取官网 JSON API `plugins.json`，失败回退静态页解析 / 离线快照，含 stars/added）、`probe`（环境探测）、`installed` / `installedAll`（读取 profile package.json 与已装包 manifest）、`install` / `update` / `updateAll` / `uninstall`（FIFO 队列 + 后台 spawn `dsh plugin` CLI，白名单与试装验证在队列头执行）、`disable` / `enable`（停用/启用并持久化到 `dsh.market.disabled`）、`op`（队列快照）、`kill`（终止/取消任务）
 - **Client 半**（`lib/client.js`）：通过 `exports["./client"]` + `dsh.client` 声明被 web 前端加载，注册到 `settings.plugins.tab` 槽位
 
 ## 安全与限制 Safety and limitations
