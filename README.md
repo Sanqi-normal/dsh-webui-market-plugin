@@ -55,7 +55,7 @@ GitHub 源安装会执行包内 prepare 脚本，如被 pnpm 拦截，把提示�
 
 持久化 bundle（`package.json` 的 `dsh.bundle.patch` → `cordis.patch.yml`），由 `dsh plugin add` 的 reconcile 自动加入 profile 的 `dsh.profile.bundles` 层：
 
-- **Host 半**（`lib/host.js`）：注册 `/api/dsh-market` 路由，提供 `list`（读取官网 JSON API `plugins.json`，失败回退静态页解析 / 离线快照，含 stars/added）、`probe`（环境探测）、`installed` / `installedAll`（读取 profile package.json 与已装包 manifest）、`install` / `update` / `updateAll` / `uninstall`（FIFO 队列 + 后台 spawn `dsh plugin` CLI，白名单与试装验证在队列头执行）、`disable` / `enable`（停用/启用并持久化到 `dsh.market.disabled`）、`op`（队列快照）、`kill`（终止/取消任务）
+- **Host 半**（`lib/host.js`）：注册 `/api/dsh-market` 路由，提供 `list`（读取官网 JSON API `plugins.json`，失败回退内置离线快照，含 stars/added；与官方 dsh-market 一致：先试官网 JSON，再用过期缓存，最后落离线快照，不解析官网 HTML）、`probe`（环境探测）、`installed` / `installedAll`（读取 profile package.json 与已装包 manifest）、`install` / `update` / `updateAll` / `uninstall`（FIFO 队列 + 后台 spawn `dsh plugin` CLI，白名单与试装验证在队列头执行）、`disable` / `enable`（停用/启用并持久化到 `dsh.market.disabled`）、`op`（队列快照）、`kill`（终止/取消任务）
 - **Client 半**（`lib/client.js`）：通过 `exports["./client"]` + `dsh.client` 声明被 web 前端加载，注册到 `settings.plugins.tab` 槽位
 
 ## 安全与限制 Safety and limitations
@@ -65,9 +65,9 @@ GitHub 源安装会执行包内 prepare 脚本，如被 pnpm 拦截，把提示�
 - **同源校验**：`install` / `uninstall` / `update` / `kill` 写操作只接受同源 POST（Origin 头与 Host 一致），跨源请求一律 403
 - **热挂载（免重启）**：安装成功后，若新插件的 `cordis.patch.yml` 是纯 `id`/`name` 插入行，会尝试挂入运行中的组合并**自动刷新页面生效**（无需手动操作）；patch 复杂或环境不支持时回退"重启生效"。热挂载输入存于 `<profile>/.dsh-market/`，每次启动自动清理
 - **更新检测与更新**：已安装插件卡片自动显示"更新"按钮（github 源对比 lockfile 锁定 commit 与 GitHub HEAD；registry 源对比 npm latest 与已装版本；本地 link/file 源不检测），点击即重新解析最新版本并作为后台任务执行，完成后下次重启生效；检测失败静默降级为"无更新"，不会阻塞列表
-- **离线目录快照**：`data/catalog-snapshot.json` 作为官网抓取失败时的离线兜底，可用 `pnpm run snapshot` 刷新
+- **离线目录快照**：`data/catalog-snapshot.json` 作为官网抓取失败时的离线兜底，可用 `pnpm run snapshot` 从官网 JSON API 直接抓取刷新（不走回退链，官网不可达时会失败而非复制旧数据）
 - **安装前自动快照**：写入真实 profile 前会把 `package.json` 备份为同目录 `.mkts-snapshot-<时间戳>.json`，配合 `dsh plugin --profile web remove <包名>` 可手工回退
 - **CI=true**：pnpm 子进程以 CI 模式运行，避免无 TTY 时静默卡在交互提示
 - **停用持久化**：停用状态写入 profile `package.json` 的 `dsh.market.disabled`（保留依赖、移出 `dsh.profile.bundles`）；市场在启动时和每次 pnpm 操作后会重新应用该集合。注意：在命令行手工执行 `dsh plugin add/remove/update` 会触发 reconcile 短暂恢复停用项，重启或下一次市场操作会再次停用
 - 安装 / 卸载后需重启 web 服务生效（热挂载成功的除外，本插件不做自动重启）
-- 目录数据优先来自官网 JSON API（`plugins.json`，与 [dsh-market](https://github.com/dsh-market/dsh-market) 同源，含 Star 数），API 不可用时回退官网静态页解析，再回退内置离线快照；插件数量与分类以官网为准
+- 目录数据来自官网 JSON API（`plugins.json`，与 [dsh-market](https://github.com/dsh-market/dsh-market) 同源，含 Star 数），抓取失败时按「过期缓存 → 内置离线快照」回退（与官方 dsh-market 策略一致，不再解析官网 HTML 静态页）；插件数量与分类以官网为准

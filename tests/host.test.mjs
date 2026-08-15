@@ -176,37 +176,34 @@ check('whitelist ignores registry spec', wl.allowed === true, wl)
 const snap = JSON.parse(readFileSync(join(dirname(fileURLToPath(new URL('../lib/host.js', import.meta.url))), '..', 'data', 'catalog-snapshot.json'), 'utf8'))
 check('snapshot exists and non-empty', Array.isArray(snap.plugins) && snap.plugins.length > 0 && Array.isArray(snap.cats), snap.updated)
 
-// --- parseSite: stars extraction + owner/repo title split (new site layout) ---
-const siteHtml = `
-<ol class="dex">
-  <li class="item" data-cat="ui" style="animation-delay:0.02s">
-    <span class="no" aria-hidden="true">№ 01</span>
-    <div>
-      <h3><a href="https://github.com/huiliyi37/dsh-tianshu-tui" rel="noopener" translate="no">huiliyi37/dsh-tianshu-tui</a><span class="stars" translate="no">★ 1,234</span></h3>
-      <p>DeepSeek Harness 的终端 UI（TUI）。</p>
-    </div>
-    <button class="copy" type="button" data-cmd="dsh plugin --profile web add github:huiliyi37/dsh-tianshu-tui">复制安装命令</button>
-  </li>
-  <li class="item" data-cat="ui">
-    <span class="no" aria-hidden="true">№ 02</span>
-    <div>
-      <h3><a href="https://github.com/Noob-stupid/dsh-plugin-hub" rel="noopener" translate="no">Noob-stupid/dsh-plugin-hub</a></h3>
-      <p>插件管理面板。</p>
-    </div>
-    <button class="copy" type="button" data-cmd="dsh plugin --profile web add github:Noob-stupid/dsh-plugin-hub">复制安装命令</button>
-  </li>
-</ol>
-<button class="chip active" type="button" data-cat="all">全部 <small>2</small></button>
-<button class="chip" type="button" data-cat="ui">UI 增强 <small>2</small></button>
-`
-const parsedSite = mod.parseSite(siteHtml)
-check('parseSite splits owner/repo title + stars', parsedSite.plugins.length === 2
-  && parsedSite.plugins[0].name === 'dsh-tianshu-tui' && parsedSite.plugins[0].by === 'huiliyi37'
-  && parsedSite.plugins[0].stars === 1234 && parsedSite.plugins[0].source === 'github:huiliyi37/dsh-tianshu-tui',
-  parsedSite.plugins[0])
-check('parseSite null stars when absent', parsedSite.plugins[1].stars === null
-  && parsedSite.plugins[1].name === 'dsh-plugin-hub' && parsedSite.plugins[1].by === 'Noob-stupid', parsedSite.plugins[1])
-check('parseSite cats', parsedSite.cats.length === 2 && parsedSite.cats[0].id === 'all' && parsedSite.cats[0].count === 2, parsedSite.cats)
+// --- registryToCatalog: plugins.json → card shape (pure, no network) ---
+const registryDoc = {
+  plugins: [
+    { name: 'dsh-tianshu-tui', owner: 'huiliyi37', url: 'https://github.com/huiliyi37/dsh-tianshu-tui',
+      category: 'ui', description: { en: 'TUI client', zh: '终端 UI' }, stars: 1234, added: '2026-08-13',
+      install: 'dsh plugin --profile web add github:huiliyi37/dsh-tianshu-tui' },
+    { name: 'dsh-plugin-hub', owner: 'Noob-stupid', url: 'https://github.com/Noob-stupid/dsh-plugin-hub',
+      category: 'ui', description: '单语言描述', install: 'dsh plugin --profile web add github:Noob-stupid/dsh-plugin-hub' },
+  ],
+  categories: { ui: { en: 'UI Enhancements', zh: 'UI 增强' } },
+}
+const zhCatalog = mod.registryToCatalog(registryDoc, 'zh')
+check('registryToCatalog zh picks zh desc + splits install', zhCatalog.plugins.length === 2
+  && zhCatalog.plugins[0].desc === '终端 UI' && zhCatalog.plugins[0].source === 'github:huiliyi37/dsh-tianshu-tui'
+  && zhCatalog.plugins[0].profile === 'web' && zhCatalog.plugins[0].stars === 1234
+  && zhCatalog.plugins[0].by === 'huiliyi37', zhCatalog.plugins[0])
+check('registryToCatalog en falls back to en desc; string desc treated as absent', mod.registryToCatalog(registryDoc, 'en').plugins[0].desc === 'TUI client'
+  && zhCatalog.plugins[1].desc === '' && zhCatalog.plugins[1].source === 'github:Noob-stupid/dsh-plugin-hub', zhCatalog.plugins[1])
+check('registryToCatalog cats counts', zhCatalog.cats.length === 2 && zhCatalog.cats[0].id === 'all' && zhCatalog.cats[0].count === 2
+  && zhCatalog.cats[1].id === 'ui' && zhCatalog.cats[1].count === 2 && zhCatalog.cats[1].label === 'UI 增强', zhCatalog.cats)
+check('registryToCatalog tolerates empty/missing registry', mod.registryToCatalog({ plugins: [], categories: {} }, 'zh').plugins.length === 0
+  && mod.registryToCatalog({}, 'zh').cats.length === 1 && mod.registryToCatalog({}, 'zh').cats[0].count === 0, 'empty input tolerated')
+
+// --- fetchLiveCatalog: direct plugins.json fetch (skipped when offline) ---
+const liveCatalog = await mod.fetchLiveCatalog('zh').then((c) => ({ ok: true, c })).catch((e) => ({ ok: false, e: String((e && e.message) || e) }))
+if (!liveCatalog.ok) skip('fetchLiveCatalog (real site)')
+else check('fetchLiveCatalog (real site)', Array.isArray(liveCatalog.c.plugins) && liveCatalog.c.plugins.length > 0
+  && liveCatalog.c.plugins.some((p) => typeof p.stars === 'number') && Array.isArray(liveCatalog.c.cats), liveCatalog.c.plugins.length)
 
 // --- author-aware identity matching (same repo basename, different owners) ---
 check('githubIdentity from url', mod.githubIdentity('https://github.com/Jesse-njx/dsh-memory') === 'jesse-njx/dsh-memory',
