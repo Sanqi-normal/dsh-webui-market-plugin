@@ -240,7 +240,7 @@ const regFixture = {
   plugins: [
     {
       name: 'dsh-tianshu-tui', owner: 'huiliyi37', url: 'https://github.com/huiliyi37/dsh-tianshu-tui',
-      category: 'ui', description: { en: 'TUI', zh: '终端 UI' }, stars: 110, added: '2026-08-13',
+      category: 'ui', description: { en: 'TUI', zh: '终端 UI' }, stars: 110, added: '2026-08-13', npm: '@huiliyi37/dsh-tianshu-tui',
       install: 'dsh plugin --profile web add github:huiliyi37/dsh-tianshu-tui',
     },
     {
@@ -254,6 +254,9 @@ const mapped = mod.registryToCatalog(regFixture, 'zh')
 check('registryToCatalog maps stars/added/owner', mapped.plugins.length === 2
   && mapped.plugins[0].stars === 110 && mapped.plugins[0].added === '2026-08-13'
   && mapped.plugins[0].by === 'huiliyi37' && mapped.plugins[0].desc === '终端 UI', mapped.plugins[0])
+check('registryToCatalog prefers curated npm source over github install cmd',
+  mapped.plugins[0].source === '@huiliyi37/dsh-tianshu-tui' && mapped.plugins[0].npm === '@huiliyi37/dsh-tianshu-tui',
+  mapped.plugins[0])
 check('registryToCatalog keeps null stars + registry source', mapped.plugins[1].stars === null
   && mapped.plugins[1].source === '@scope/pkg' && mapped.plugins[1].profile === 'web', mapped.plugins[1])
 check('registryToCatalog cats (all + per category)', mapped.cats.length === 3
