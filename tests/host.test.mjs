@@ -295,6 +295,17 @@ if (bothDone) {
   check('FIFO order: first op settled before second', order.length === 2 && order[0].id === op2Call.opId && order[1].id === opCall.opId, order.map((o) => o.id + ':' + o.status))
   const opById = await call({ method: 'op', opId: opCall.opId })
   check('op by id matches after settle', opById.ok && opById.op && opById.op.id === opCall.opId && opById.op.status === 'done', opById)
+
+  // Clear persists host-side: dismissed finished ops disappear from history
+  // and are no longer returned by id, so refresh/reopen cannot resurrect them.
+  const clearCross = await call({ method: 'clear', opId: opCall.opId }, { origin: 'http://evil.example' })
+  check('clear rejected cross-origin', clearCross.ok === false && /untrusted/.test(clearCross.error || ''), clearCross)
+  const cleared = await call({ method: 'clear', opId: opCall.opId })
+  check('clear finished op ok', cleared.ok === true, cleared)
+  const clearedById = await call({ method: 'op', opId: opCall.opId })
+  check('cleared op no longer returned by id', clearedById.ok && clearedById.op === null, clearedById)
+  const clearedSnap = await call({ method: 'op' })
+  check('cleared op removed from history snapshot', !clearedSnap.history.some((o) => o.id === opCall.opId), clearedSnap.history)
 }
 
 // kill path: cancel a queued op and kill the live one.
