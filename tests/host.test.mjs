@@ -4,7 +4,7 @@
 // Run: node --test tests/host.test.mjs
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { delimiter, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const TEST_HOME = mkdtempSync(join(tmpdir(), 'dsh-mkts-home-'))
@@ -385,6 +385,36 @@ const afterQueue = await call({ method: 'install', source: 'fake:again', profile
 check('new op starts after queue drained', afterQueue.ok && afterQueue.opId, afterQueue)
 const afterDone = await waitForOps((s) => s.op === null && s.history.some((o) => o.id === afterQueue.opId && o.status === 'done'))
 check('post-queue op settles done', !!afterDone, afterDone)
+
+// --- PATH `dsh` fallback: PATH scan decides, bare `dsh` spawns via shell on Windows ---
+{
+  const savedPath = process.env.PATH
+  const savedBin = process.env.DSH_BIN
+  const pathDir = mkdtempSync(join(tmpdir(), 'mkts-pathbin-'))
+  writeFileSync(join(pathDir, 'mkts-path-bin.mjs'), 'setTimeout(() => { process.exit(0) }, 300)\n')
+  writeFileSync(join(pathDir, 'dsh.cmd'), '@echo off\r\nnode "%~dp0mkts-path-bin.mjs" %*\r\n')
+  writeFileSync(join(pathDir, 'dsh'), '#!/usr/bin/env node\nsetTimeout(() => process.exit(0), 300)\n')
+  delete process.env.DSH_BIN
+  process.env.PATH = pathDir + delimiter + (savedPath || '')
+  try {
+    const pathProbe = await call({ method: 'probe' })
+    check('PATH fallback detected (dshBin reports bare dsh)', pathProbe.ok && pathProbe.dshBin === 'dsh', pathProbe)
+    const pathOp = await call({ method: 'install', source: 'fake:path', profile: 'web', label: 'path-bin', skipCheck: true })
+    check('PATH fallback enqueues without explicit bin', pathOp.ok && pathOp.opId, pathOp)
+    const pathDone = await waitForOps((s) => s.op === null && s.history.some((o) => o.id === pathOp.opId && o.status === 'done'))
+    check('PATH fallback op spawns through shell and settles done', !!pathDone, pathDone)
+    // cmd-injection guard: shell-mediated spawns refuse unsafe argv.
+    const unsafeOp = await call({ method: 'install', source: 'fake & calc', profile: 'web', label: 'unsafe', skipCheck: true })
+    check('unsafe op enqueued (guard fires at queue head)', unsafeOp.ok && unsafeOp.opId, unsafeOp)
+    const unsafeRefused = await waitForOps((s) => s.op === null && s.history.some((o) => o.id === unsafeOp.opId && o.status === 'refused'))
+    check('shell path refuses unsafe target', !!unsafeRefused && /unsafe/.test((unsafeRefused.history.find((o) => o.id === unsafeOp.opId) || {}).output || ''), unsafeRefused)
+  } finally {
+    if (savedPath === undefined) delete process.env.PATH
+    else process.env.PATH = savedPath
+    if (savedBin === undefined) delete process.env.DSH_BIN
+    else process.env.DSH_BIN = savedBin
+  }
+}
 
 // Supply-chain release-age auto-heal end to end: the CLI fails once with the
 // pnpm minimumReleaseAge violation, the host heals the profile's exclude list
