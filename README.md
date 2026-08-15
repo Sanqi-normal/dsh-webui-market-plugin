@@ -12,7 +12,7 @@ A community implementation — **prefer the official [dsh-market](https://github
 
 ## 效果展示 Screenshot
 
-![插件市场效果](img/7f0810a3710382f3810e9aa42f160cc1.png)
+![插件市场效果](img/51766e7935d9e67d7087510e4d6b0cb8.png)
 
 ## 安装 Install
 
