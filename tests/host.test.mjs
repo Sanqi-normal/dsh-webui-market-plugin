@@ -453,6 +453,56 @@ if (healDone) {
   check('heal wrote the union exclude entry', /dsh-model-picker@1\.0\.2/.test(healYamlText), healYamlText)
 }
 
+// Network-error auto-retry: fail once with pnpm's GET/retry pattern, then succeed.
+const netBin = join(tmpdir(), 'mkts-net-bin-' + process.pid + '.mjs')
+const netMarker = netBin + '.runs'
+writeFileSync(netMarker, '0')
+writeFileSync(netBin, `
+import { readFileSync, writeFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+const marker = fileURLToPath(import.meta.url) + '.runs'
+const runs = Number(readFileSync(marker, 'utf8'))
+writeFileSync(marker, String(runs + 1))
+if (runs === 0) {
+  process.stderr.write('GET https://codeload.github.com/o/r/tar.gz/abc\\n')
+  process.stderr.write('error ETIMEDOUT. Retrying...\\n')
+  process.exit(1)
+}
+process.exit(0)
+`)
+const netCall = await call({ method: 'install', source: 'fake:net', profile: 'web', binPath: netBin, label: 'net-retry', skipCheck: true })
+check('network-error op enqueues', netCall.ok && netCall.opId, netCall)
+const netDone = await waitForOps((s) => s.op === null && s.history.some((o) => o.id === netCall.opId && o.status === 'done'))
+check('network-error op auto-retries once and settles done', !!netDone, netDone)
+if (netDone) {
+  const netRow = netDone.history.find((o) => o.id === netCall.opId)
+  check('network-error output shows auto-retry note', /\[auto\] 检测到网络错误/.test(netRow.output || ''), (netRow.output || '').slice(0, 400))
+  check('network-error op ran CLI twice', readFileSync(netMarker, 'utf8') === '2', readFileSync(netMarker, 'utf8'))
+}
+
+// Persistent network failure: bounded retry (exactly two runs), then a clear hint.
+const netFailBin = join(tmpdir(), 'mkts-net-fail-bin-' + process.pid + '.mjs')
+const netFailMarker = netFailBin + '.runs'
+writeFileSync(netFailMarker, '0')
+writeFileSync(netFailBin, `
+import { readFileSync, writeFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+const marker = fileURLToPath(import.meta.url) + '.runs'
+const runs = Number(readFileSync(marker, 'utf8'))
+writeFileSync(marker, String(runs + 1))
+process.stderr.write('GET https://registry.npmjs.org/pkg error ECONNRESET. Retrying...\\n')
+process.exit(1)
+`)
+const netFailCall = await call({ method: 'install', source: 'fake:netfail', profile: 'web', binPath: netFailBin, label: 'net-fail', skipCheck: true })
+check('persistent network-error op enqueues', netFailCall.ok && netFailCall.opId, netFailCall)
+const netFailDone = await waitForOps((s) => s.op === null && s.history.some((o) => o.id === netFailCall.opId && o.status === 'failed'))
+check('persistent network-error op settles failed after one bounded retry', !!netFailDone, netFailDone)
+if (netFailDone) {
+  const netFailRow = netFailDone.history.find((o) => o.id === netFailCall.opId)
+  check('network failure shows final hint', /\[network\] 网络拉取失败/.test(netFailRow.output || ''), (netFailRow.output || '').slice(0, 500))
+  check('network failure did not retry endlessly', readFileSync(netFailMarker, 'utf8') === '2', readFileSync(netFailMarker, 'utf8'))
+}
+
 // Update uses the same queue (then killed to keep the test fast).
 writeFileSync(fakeBin, `setTimeout(() => {}, 60000)\n`)
 const updQueued = await call({ method: 'update', name: 'fake-installed', profile: 'web', binPath: fakeBin })

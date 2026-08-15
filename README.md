@@ -42,7 +42,7 @@ GitHub 源安装会执行包内 prepare 脚本，如被 pnpm 拦截，把提示�
 
 - 目录按分类分组，支持搜索与"已安装"过滤；每个卡片显示 GitHub Star 数（无数据不显示），可一键按 **最热（Star 降序，无 Star 的排最后）/ 最新（收录日期）** 排序，或恢复官网默认顺序；大目录分批渐进渲染，避免打开瞬间一次性插入数百卡片造成卡顿
 - 点 **详情** 查看该插件的官方安装命令（含目标 profile）
-- **安装 / 更新 / 卸载** 组成 FIFO 任务队列：多个插件可以连续排队提交，任务面板固定在右下角、不随页面滚动隐藏，实时显示「排队中 / 校验中 / 执行中 / 完成 / 失败 / 已终止 / 超时」，可取消排队项、终止执行项、查看每个任务的 pnpm 日志；每个任务超过 120 秒自动超时；**一键更新全部**会把所有可更新插件依次加入队列；清除已完成/失败任务会同步到服务端，刷新或重新打开面板后不会再次出现
+- **安装 / 更新 / 卸载** 组成 FIFO 任务队列：多个插件可以连续排队提交，任务面板固定在右下角、不随页面滚动隐藏，实时显示「排队中 / 校验中 / 执行中 / 完成 / 失败 / 已终止 / 超时」，可取消排队项、终止执行项、查看每个任务的 pnpm 日志；每个任务默认超过 120 秒自动超时（可用环境变量 `DSH_MARKET_OP_TIMEOUT_MS` 调大，如 `300000`）；遇到 pnpm 的临时网络错误（`GET ... error` / `ETIMEDOUT` / `ECONNRESET` 等）会**自动重试一次**，持续失败时给出代理/镜像排查提示；**一键更新全部**会把所有可更新插件依次加入队列；清除已完成/失败任务会同步到服务端，刷新或重新打开面板后不会再次出现
 - pnpm ≥11 默认开启 24 小时 minimumReleaseAge 供应链策略：依赖里刚发布（24 小时内）的包会让所有安装/更新/卸载被 pnpm 拦截。遇到 ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION 时市场会自动把违规的 name@version 合并进 profile 的 pnpm-workspace.yaml 的 minimumReleaseAgeExclude（同名多版本写成 name@v1||v2 联合，避免 pnpm 只认首条同名规则）并自动重试一次，无需手动改配置
 - **停用 / 启用**：停用保留依赖与磁盘文件，只把插件移出激活的 bundle 层（重启后仍保持停用）；启用按原顺序恢复，免删装；卡片操作区横向排列在卡片底部，避免右侧按钮拥挤
 - **本机插件**：列出所有由依赖管理的插件（含在市场之外安装的），标注目录内/目录外、已停用、来源类型，可直接停用、启用或卸载（内置 bundle 与本地 link/file 源不会提供删除）
@@ -68,6 +68,7 @@ GitHub 源安装会执行包内 prepare 脚本，如被 pnpm 拦截，把提示�
 - **离线目录快照**：`data/catalog-snapshot.json` 作为官网抓取失败时的离线兜底，可用 `pnpm run snapshot` 从官网 JSON API 直接抓取刷新（不走回退链，官网不可达时会失败而非复制旧数据）
 - **安装前自动快照**：写入真实 profile 前会把 `package.json` 备份为同目录 `.mkts-snapshot-<时间戳>.json`，配合 `dsh plugin --profile web remove <包名>` 可手工回退
 - **CI=true**：pnpm 子进程以 CI 模式运行，避免无 TTY 时静默卡在交互提示
+- **网络超时控制**：pnpm 子进程默认使用较短的 `fetch-timeout`（30s）和 `fetch-retries`（1），避免弱网下“GET 链接 error 一直 retry”拖到任务超时；可用 `DSH_MARKET_FETCH_TIMEOUT_MS`、`DSH_MARKET_FETCH_RETRIES`、`DSH_MARKET_FETCH_RETRY_MINTIMEOUT_MS`、`DSH_MARKET_FETCH_RETRY_MAXTIMEOUT_MS` 覆盖；前端 `/api/dsh-market` 请求默认 30 秒超时，防止面板因外部网络卡死
 - **停用持久化**：停用状态写入 profile `package.json` 的 `dsh.market.disabled`（保留依赖、移出 `dsh.profile.bundles`）；市场在启动时和每次 pnpm 操作后会重新应用该集合。注意：在命令行手工执行 `dsh plugin add/remove/update` 会触发 reconcile 短暂恢复停用项，重启或下一次市场操作会再次停用
 - 安装 / 卸载后需重启 web 服务生效（热挂载成功的除外，本插件不做自动重启）
 - 目录数据来自官网 JSON API（`plugins.json`，与 [dsh-market](https://github.com/dsh-market/dsh-market) 同源，含 Star 数），抓取失败时按「过期缓存 → 内置离线快照」回退（与官方 dsh-market 策略一致，不再解析官网 HTML 静态页）；插件数量与分类以官网为准
