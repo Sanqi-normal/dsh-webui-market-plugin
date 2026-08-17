@@ -34,6 +34,16 @@ GitHub 源安装会执行包内 prepare 脚本，如被 pnpm 拦截，把提示�
 
 pnpm 11 起，依赖树中"构建脚本未在 `allowBuilds` 中显式放行或拒绝"的包会直接导致 `ERR_PNPM_IGNORED_BUILDS`。若该包在当前 profile 不需要执行构建脚本，可把对应项写成 `false`（明确拒绝）而不是 `true`（放行执行）；市场插件的试装验证会继承真实 web profile 的 `pnpm-workspace.yaml`，因此这里的 `true/false` 决策也会作用于试装环境。
 
+## 宿主依赖说明
+
+本插件是 DSH web profile 内运行的插件，不是独立 npm 应用。以下 peer 依赖由 DSH 宿主环境提供，用户无需手动安装：
+
+- `@deepseek-ai/cordis`
+- `@deepseek-ai/dsh-client-runtime`
+- `@deepseek-ai/dsh-client-ui-slots`
+
+当前版本面向 DSH `0.0.1-rc.2+`（不含已知解析问题的 `0.0.1-rc.1`）及 `0.1.0-rc.2+` 环境。若使用纯 npm registry 工具解析本包，可能因为 DSH 上游部分 host 包未发布而提示依赖图不完整，这属于 DSH 宿主依赖的发布问题。
+
 ## 使用
 
 打开 **设置（Settings）→ 插件（Plugins）→ 插件市场（Plugin Market）**：

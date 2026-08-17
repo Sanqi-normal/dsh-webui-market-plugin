@@ -34,6 +34,16 @@ Installing from GitHub runs the package's prepare script. If pnpm blocks it, add
 
 Since pnpm 11, any package whose build script is not explicitly allowed or rejected in `allowBuilds` will cause `ERR_PNPM_IGNORED_BUILDS` and abort the install. If the package does not need to run its build script in the current profile, set the entry to `false` (explicitly reject) instead of `true` (allow running). The plugin's trial-boot validation inherits the real web profile's `pnpm-workspace.yaml`, so this `true`/`false` decision also applies to the trial environment.
 
+## Host dependency note
+
+This plugin runs inside a DSH web profile; it is not a standalone npm application. The following peer dependencies are supplied by the DSH host environment and do not need to be installed manually:
+
+- `@deepseek-ai/cordis`
+- `@deepseek-ai/dsh-client-runtime`
+- `@deepseek-ai/dsh-client-ui-slots`
+
+The current version targets DSH `0.0.1-rc.2+` environments (excluding the known broken `0.0.1-rc.1`) and `0.1.0-rc.2+` environments. If you resolve this package with a pure npm registry tool, it may report an incomplete dependency graph because some upstream DSH host packages are not published; that is a DSH host dependency publication issue.
+
 ## Usage
 
 Open **Settings → Plugins → Plugin Market**:
