@@ -497,6 +497,34 @@ check('npmRegistryFor prefers env over .npmrc', mod.npmRegistryFor('web') === 'h
 if (savedRegistryEnv === undefined) delete process.env.npm_config_registry
 else process.env.npm_config_registry = savedRegistryEnv
 
+// --- readLockCommits: the importer's resolved commit must win over a stale
+// transitive copy that appears later in the packages section. ---
+const lockProfile = '__locktest__'
+const lockDir = join(TEST_HOME, 'profiles', lockProfile)
+mkdirSync(lockDir, { recursive: true })
+writeFileSync(join(lockDir, 'pnpm-lock.yaml'), [
+    "lockfileVersion: '9.0'",
+    '',
+    'importers:',
+    '',
+    '  .:',
+    '    dependencies:',
+    '      dsh-sample:',
+    '        specifier: github:owner/repo#1111111111111111111111111111111111111111',
+    '        version: https://codeload.github.com/owner/repo/tar.gz/1111111111111111111111111111111111111111',
+    '',
+    'packages:',
+    '',
+    '  dsh-sample@https://codeload.github.com/owner/repo/tar.gz/1111111111111111111111111111111111111111:',
+    '    resolution: {tarball: https://codeload.github.com/owner/repo/tar.gz/1111111111111111111111111111111111111111}',
+    '',
+    '  dsh-sample@https://codeload.github.com/owner/repo/tar.gz/2222222222222222222222222222222222222222:',
+    '    resolution: {tarball: https://codeload.github.com/owner/repo/tar.gz/2222222222222222222222222222222222222222}',
+  ].join('\n') + '\n')
+const lockCommits = mod.readLockCommits(lockProfile)
+check('readLockCommits prefers importer resolved commit', lockCommits.get('owner/repo') === '1111111111111111111111111111111111111111', lockCommits)
+rmSync(lockDir, { recursive: true, force: true })
+
 // --- queue pipeline with a fake CLI bin (never touches the real profile) ---
 const fakeBin = join(tmpdir(), 'mkts-fake-bin-' + process.pid + '.mjs')
 writeFileSync(fakeBin, `
