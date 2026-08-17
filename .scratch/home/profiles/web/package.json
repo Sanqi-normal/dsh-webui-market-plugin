@@ -1,0 +1,16 @@
+{
+          "private": true,
+          "name": "dsh-profile-web",
+          "dependencies": {
+                    "@liustack/modlens": "^3.17.0",
+                    "dsh-better-sidebar": "^0.12.2"
+          },
+          "dsh": {
+                    "profile": {
+                              "bundles": [
+                                        "@deepseek-ai/dsh-base",
+                                        "@deepseek-ai/dsh-web-app"
+                              ]
+                    }
+          }
+}

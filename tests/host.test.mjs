@@ -2,7 +2,7 @@
 // exercises the API surface + op pipeline with a fake CLI bin. DSH_HOME points
 // at a throwaway directory, so no real profile or network install is touched.
 // Run: node --test tests/host.test.mjs
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -12,8 +12,17 @@ mkdirSync(join(TEST_HOME, 'profiles', 'web'), { recursive: true })
 writeFileSync(join(TEST_HOME, 'profiles', 'web', 'package.json'), JSON.stringify({
   name: 'dsh-profile-web',
   private: true,
-  dependencies: { 'fake-installed': '^1.0.0', 'github-dep': 'github:Jesse-njx/dsh-memory' },
+  dependencies: { 'fake-installed': '^1.0.0', 'github-dep': 'github:Jesse-njx/dsh-memory', 'linked-dep': 'link:../dev-dep' },
   dsh: { profile: { bundles: ['fake-installed', 'builtin-bundle'] } },
+}, null, 2) + '\n')
+// A second, empty profile emulating a desktop shell's own profile: market
+// installs land in web by default, so desktop users must sync/install into it.
+mkdirSync(join(TEST_HOME, 'profiles', 'desktop'), { recursive: true })
+writeFileSync(join(TEST_HOME, 'profiles', 'desktop', 'package.json'), JSON.stringify({
+  name: 'dsh-profile-desktop',
+  private: true,
+  dependencies: {},
+  dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'] } },
 }, null, 2) + '\n')
 process.env.DSH_HOME = TEST_HOME
 
@@ -78,6 +87,10 @@ async function waitForOps(predicate, timeoutMs = 8000) {
 process.env.DSH_BIN = process.execPath
 const probe = await call({ method: 'probe' })
 check('probe env', probe.ok && probe.dshHome === TEST_HOME && probe.node && probe.dshBin, probe)
+check('probe lists initialized profiles (web first)', probe.ok && Array.isArray(probe.profiles)
+  && probe.profiles.length === 2 && probe.profiles[0].name === 'web'
+  && probe.profiles.some((p) => p.name === 'desktop')
+  && probe.profiles.find((p) => p.name === 'desktop').depCount === 0, probe.profiles)
 
 const inst = await call({ method: 'installed' })
 check('installed shape', inst.ok && Array.isArray(inst.bundles) && typeof inst.dependencies === 'object' && Array.isArray(inst.disabled), inst)
@@ -91,6 +104,18 @@ check('installedAll lists dep + builtin', all.ok
   && Array.isArray(all.builtin) && all.builtin.includes('builtin-bundle'), all)
 check('installedAll rows carry resolved repo identity', all.ok
   && all.plugins.some((p) => p.name === 'github-dep' && p.repo === 'jesse-njx/dsh-memory'), all.plugins)
+
+// --- syncPlan: read-only cross-profile diff (web -> desktop) ---
+const plan0 = mod.syncPlan('web', 'desktop')
+check('syncPlan lists web-only plugins missing in desktop', plan0.missing.some((m) => m.name === 'fake-installed' && m.source === 'fake-installed')
+  && plan0.missing.some((m) => m.name === 'github-dep' && m.source === 'github:Jesse-njx/dsh-memory'), plan0.missing)
+check('syncPlan excludes local link/file dev specs', !plan0.missing.some((m) => m.name === 'linked-dep'), plan0.missing)
+check('syncPlan ignores same-profile request', mod.syncPlan('web', 'web').missing.length === 0, mod.syncPlan('web', 'web'))
+check('syncPlan tolerates unknown profiles', mod.syncPlan('__nope__', 'desktop').missing.length === 0
+  && mod.syncPlan('web', '__nope__').missing.length === 0, 'unknown profile degraded')
+const planEndpoint = await call({ method: 'syncPlan', from: 'web', to: 'desktop' })
+check('syncPlan endpoint returns missing rows', planEndpoint.ok === true && Array.isArray(planEndpoint.missing)
+  && planEndpoint.missing.some((m) => m.name === 'github-dep'), planEndpoint)
 
 const emptyOp = await call({ method: 'op' })
 check('op empty -> null queue/history', emptyOp.ok && emptyOp.op === null
@@ -171,6 +196,52 @@ await call({ method: 'kill' })
 
 const wl = await mod.whitelistSource('@some/pkg', [{ source: 'github:a/b' }])
 check('whitelist ignores registry spec', wl.allowed === true, wl)
+
+// --- desktop profile install pipeline (no trial boot, whitelist + snapshot) ---
+// The whitelist now gates EVERY profile, desktop included.
+const deskRefused = await call({ method: 'install', source: 'github:somebody/not-in-catalog', profile: 'desktop', binPath: process.execPath })
+check('desktop install enqueued (whitelist at queue head)', deskRefused.ok === true && deskRefused.opId, deskRefused)
+const deskRefusedDone = await waitForOps((s) => s.op === null && s.history.some((o) => o.id === deskRefused.opId && o.status === 'refused'))
+check('desktop install refused by whitelist too', !!deskRefusedDone, deskRefusedDone)
+
+// Registry specs bypass the whitelist. The fake bin prints NO web readiness
+// line: if the host ran the web trial boot for a desktop-profile install, the
+// probe would refuse at the boot stage — settling done proves the probe stayed
+// web-only while snapshot + CLI install still ran for the desktop profile.
+const deskBin = join(tmpdir(), 'mkts-desk-bin-' + process.pid + '.mjs')
+writeFileSync(deskBin, `
+import { readFileSync, writeFileSync } from 'node:fs'
+const json = JSON.parse(readFileSync('package.json', 'utf8'))
+json.dependencies = json.dependencies || {}
+json.dependencies['fake-installed'] = '^1.0.0'
+writeFileSync('package.json', JSON.stringify(json, null, 2) + '\\n')
+process.exit(0)
+`)
+const deskCall = await call({ method: 'install', source: 'fake:desk', profile: 'desktop', binPath: deskBin, label: 'desk-ok' })
+check('desktop install enqueues without skipCheck', deskCall.ok && deskCall.opId, deskCall)
+const deskDone = await waitForOps((s) => s.op === null && s.history.some((o) => o.id === deskCall.opId && o.status === 'done'))
+check('desktop install settles done without trial boot', !!deskDone, deskDone)
+if (deskDone) {
+  const deskRow = deskDone.history.find((o) => o.id === deskCall.opId)
+  check('desktop install op reports hot=false (web-only hot mount)', deskRow.hot === false, deskRow)
+  const deskDir = join(TEST_HOME, 'profiles', 'desktop')
+  check('desktop install created a pre-install snapshot in the desktop profile',
+    readdirSync(deskDir).some((f) => f.startsWith('package.json.mkts-snapshot-')), readdirSync(deskDir))
+  const deskManifest = JSON.parse(readFileSync(join(deskDir, 'package.json'), 'utf8'))
+  check('desktop install wrote the dependency into the desktop manifest', deskManifest.dependencies['fake-installed'] !== undefined, deskManifest)
+}
+
+// After a successful sync-style install, the diff drops the synced plugin.
+const plan1 = mod.syncPlan('web', 'desktop')
+check('syncPlan drops already-synced plugin', plan1.missing.every((m) => m.name !== 'fake-installed')
+  && plan1.missing.some((m) => m.name === 'github-dep'), plan1.missing)
+
+// Desktop uninstall: dispose/hot-mount guards are web-only, remove still runs.
+writeFileSync(deskBin, `process.exit(0)\n`)
+const deskUninst = await call({ method: 'uninstall', pkg: 'fake-installed', profile: 'desktop', binPath: deskBin, label: 'desk-rm' })
+check('desktop uninstall enqueues', deskUninst.ok && deskUninst.opId, deskUninst)
+const deskUninstDone = await waitForOps((s) => s.op === null && s.history.some((o) => o.id === deskUninst.opId && o.status === 'done'))
+check('desktop uninstall settles done', !!deskUninstDone, deskUninstDone)
 
 // --- catalog snapshot fallback (bundled data/catalog-snapshot.json) ---
 const snap = JSON.parse(readFileSync(join(dirname(fileURLToPath(new URL('../lib/host.js', import.meta.url))), '..', 'data', 'catalog-snapshot.json'), 'utf8'))
