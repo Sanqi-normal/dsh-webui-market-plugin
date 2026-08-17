@@ -2,7 +2,7 @@
 // exercises the API surface + op pipeline with a fake CLI bin. DSH_HOME points
 // at a throwaway directory, so no real profile or network install is touched.
 // Run: node --test tests/host.test.mjs
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -290,6 +290,82 @@ const appendedYaml = readFileSync(healYaml, 'utf8')
 check('heal appends the exclude block when missing', appended.length === 1
   && /minimumReleaseAgeExclude:\n  - dsh-model-picker@1\.0\.2/.test(appendedYaml), appendedYaml)
 
+// --- build-script approval auto-heal (pnpm >=11 ERR_PNPM_IGNORED_BUILDS) ---
+const ignoredOut = '[ERR_PNPM_IGNORED_BUILDS] Ignored build scripts: cloudflared@0.7.3, cpu-features@0.0.10, ssh2@1.17.0\n'
+  + 'Run "pnpm approve-builds" to pick which dependencies should be allowed to run scripts.\n'
+const parsed = mod.parseIgnoredBuilds(ignoredOut)
+check('parseIgnoredBuilds extracts names', parsed.length === 3
+  && parsed[0] === 'cloudflared' && parsed[1] === 'cpu-features' && parsed[2] === 'ssh2', parsed)
+const parsedScoped = mod.parseIgnoredBuilds('[ERR_PNPM_IGNORED_BUILDS] Ignored build scripts: @scope/pkg@1.2.3, esbuild@0.24.2\n')
+check('parseIgnoredBuilds keeps scoped names', parsedScoped.length === 2
+  && parsedScoped[0] === '@scope/pkg' && parsedScoped[1] === 'esbuild', parsedScoped)
+check('parseIgnoredBuilds no-ops without marker', mod.parseIgnoredBuilds('pnpm: network unreachable\n').length === 0, mod.parseIgnoredBuilds('pnpm: network unreachable\n'))
+
+writeFileSync(healYaml, 'packages:\n  - .\n\nnodeLinker: hoisted\n\nminimumReleaseAgeExclude:\n  - dsh-model-picker@1.0.2\n')
+const abApproved = mod.healAllowBuilds('web', ignoredOut)
+const abYaml = readFileSync(healYaml, 'utf8')
+check('healAllowBuilds merges allowBuilds map', abApproved.join(',') === 'cloudflared,cpu-features,ssh2'
+  && /allowBuilds:\n  cloudflared: true\n  cpu-features: true\n  ssh2: true/.test(abYaml), abYaml)
+check('healAllowBuilds preserves unrelated keys', /nodeLinker: hoisted/.test(abYaml)
+  && /minimumReleaseAgeExclude:\n  - dsh-model-picker@1\.0\.2/.test(abYaml), abYaml)
+check('healAllowBuilds idempotent', mod.healAllowBuilds('web', ignoredOut).length === 0
+  && readFileSync(healYaml, 'utf8') === abYaml, readFileSync(healYaml, 'utf8'))
+check('healAllowBuilds no-ops without marker', mod.healAllowBuilds('web', 'pnpm: EPERM\n').length === 0, mod.healAllowBuilds('web', 'pnpm: EPERM\n'))
+
+// Probe install-stage retry: the fake CLI fails the first install with the
+// IGNORED_BUILDS error, the probe approves the flagged packages in the
+// throwaway profile and retries; the boot stage then decides.
+const probeAbBin = join(tmpdir(), 'mkts-probe-ab-bin-' + process.pid + '.mjs')
+writeFileSync(probeAbBin, `
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+const isBoot = !process.argv.includes('plugin') && process.argv.includes('--port')
+if (isBoot) {
+  process.stdout.write('dsh web: http://127.0.0.1:0\\n')
+  process.exit(0)
+}
+const yaml = readFileSync(join(process.env.DSH_HOME, 'profiles', 'web', 'pnpm-workspace.yaml'), 'utf8')
+if (!/allowBuilds:\\n  cloudflared: true/.test(yaml)) {
+  process.stderr.write('[ERR_PNPM_IGNORED_BUILDS] Ignored build scripts: cloudflared@0.7.3\\n')
+  process.exit(1)
+}
+process.stdout.write('fake-bin installing\\n')
+process.exit(0)
+`)
+const probeAbOk = await mod.runProbe(probeAbBin, 'fake:ab')
+check('probe retries install after approving flagged builds', probeAbOk.ok === true, probeAbOk)
+
+// Build-script approval auto-heal end to end: the CLI fails once with the
+// pnpm IGNORED_BUILDS error, the host approves the flagged packages and
+// retries, and the op settles done.
+const abBin = join(tmpdir(), 'mkts-ab-bin-' + process.pid + '.mjs')
+const abMarker = abBin + '.runs'
+writeFileSync(abMarker, '0')
+writeFileSync(join(TEST_HOME, 'profiles', 'web', 'pnpm-workspace.yaml'), 'packages:\n  - .\n')
+writeFileSync(abBin, `
+import { readFileSync, writeFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+const marker = fileURLToPath(import.meta.url) + '.runs'
+const runs = Number(readFileSync(marker, 'utf8'))
+writeFileSync(marker, String(runs + 1))
+if (runs === 0) {
+  process.stderr.write('[ERR_PNPM_IGNORED_BUILDS] Ignored build scripts: cloudflared@0.7.3, cpu-features@0.0.10, ssh2@1.17.0\\n')
+  process.exit(1)
+}
+process.exit(0)
+`)
+const abCall = await call({ method: 'install', source: 'fake:ab', profile: 'web', binPath: abBin, label: 'ab-me', skipCheck: true })
+check('build-approval op enqueues', abCall.ok && abCall.opId, abCall)
+const abDone = await waitForOps((s) => s.op === null && s.history.some((o) => o.id === abCall.opId && o.status === 'done'))
+check('build-approval op auto-retries and settles done', !!abDone, abDone)
+if (abDone) {
+  const abRow = abDone.history.find((o) => o.id === abCall.opId)
+  check('build-approval op output shows the auto-retry note', /\[auto\]/.test(abRow.output || ''), (abRow.output || '').slice(0, 300))
+  check('build-approval op ran the CLI twice', readFileSync(abMarker, 'utf8') === '2', readFileSync(abMarker, 'utf8'))
+  const abYamlText = readFileSync(join(TEST_HOME, 'profiles', 'web', 'pnpm-workspace.yaml'), 'utf8')
+  check('build-approval op wrote allowBuilds entries', /allowBuilds:\n  cloudflared: true\n  cpu-features: true\n  ssh2: true/.test(abYamlText), abYamlText)
+}
+
 // --- parseSimplePatch: hot-mountable patch shape detection ---
 const simplePatch = mod.parseSimplePatch('- insert:\n    - id: tool-csv\n      name: \'@deepseek-ai/dsh-tool-csv\'\n')
 check('parseSimplePatch accepts plain id/name rows', simplePatch !== null && simplePatch.length === 1 && simplePatch[0].id === 'tool-csv', simplePatch)
@@ -328,6 +404,27 @@ check('github update target strips .git before pinning',
   mod.updateTargetFor('github:vlln/dsh-navbar.git', 'x', '6e23640bd60c0157043ae5c29a6d80034287b41b'))
 check('npm update target uses name@latest', mod.updateTargetFor('^1.0.0', 'fake-installed', '1.2.0') === 'fake-installed@latest',
   mod.updateTargetFor('^1.0.0', 'fake-installed', '1.2.0'))
+
+// --- npm registry resolution for update checks ---
+const savedRegistryEnv = process.env.npm_config_registry
+delete process.env.npm_config_registry
+delete process.env.NPM_CONFIG_REGISTRY
+const npmrcPath = join(TEST_HOME, 'profiles', 'web', '.npmrc')
+const hadNpmrc = existsSync(npmrcPath)
+if (hadNpmrc) {
+  const npmrcBackup = readFileSync(npmrcPath, 'utf8')
+  writeFileSync(npmrcPath, 'registry=https://mirror.example.com\n')
+  check('npmRegistryFor reads profile .npmrc', mod.npmRegistryFor('web') === 'https://mirror.example.com/', mod.npmRegistryFor('web'))
+  writeFileSync(npmrcPath, npmrcBackup)
+} else {
+  writeFileSync(npmrcPath, 'registry=https://mirror.example.com\n')
+  check('npmRegistryFor reads profile .npmrc', mod.npmRegistryFor('web') === 'https://mirror.example.com/', mod.npmRegistryFor('web'))
+  rmSync(npmrcPath, { force: true })
+}
+process.env.npm_config_registry = 'https://registry.example.com/'
+check('npmRegistryFor prefers env over .npmrc', mod.npmRegistryFor('web') === 'https://registry.example.com/', mod.npmRegistryFor('web'))
+if (savedRegistryEnv === undefined) delete process.env.npm_config_registry
+else process.env.npm_config_registry = savedRegistryEnv
 
 // --- queue pipeline with a fake CLI bin (never touches the real profile) ---
 const fakeBin = join(tmpdir(), 'mkts-fake-bin-' + process.pid + '.mjs')
@@ -579,6 +676,34 @@ await waitForOps((s) => s.op === null && s.history.some((o) => o.id === reapply.
 manifest = JSON.parse(readFileSync(join(TEST_HOME, 'profiles', 'web', 'package.json'), 'utf8'))
 check('reapply keeps disabled bundle out after a market op', !manifest.dsh.profile.bundles.includes('fake-installed'), manifest.dsh.profile.bundles)
 await call({ method: 'enable', name: 'fake-installed', profile: 'web' })
+
+// Regression: a successful install/update must invalidate the server-side
+// update cache. If a prior `updates` call populated the cache and the op only
+// cleared it before enqueueing, a concurrent/stale response could repopulate
+// the old dependency state and the UI would keep showing an update after the
+// operation reported success. The cache is cleared again after the profile
+// changes, so the next `updates` call recomputes from the new manifest.
+const addDepBin = join(tmpdir(), 'mkts-add-dep-bin-' + process.pid + '.mjs')
+writeFileSync(addDepBin, `
+import { readFileSync, writeFileSync } from 'node:fs'
+const file = 'package.json'
+const json = JSON.parse(readFileSync(file, 'utf8'))
+json.dependencies = json.dependencies || {}
+json.dependencies['fake-added'] = '^1.0.0'
+writeFileSync(file, JSON.stringify(json, null, 2) + '\\n')
+process.exit(0)
+`)
+// Populate the cache with the pre-install dependency set.
+const preAddUpdates = await call({ method: 'updates', profile: 'web' })
+check('updates cache primed before install regression', preAddUpdates.ok === true, preAddUpdates)
+const addDepCall = await call({ method: 'install', source: 'fake:add-dep', profile: 'web', binPath: addDepBin, label: 'add-dep', skipCheck: true })
+check('install cache-invalidation op enqueues', addDepCall.ok && addDepCall.opId, addDepCall)
+const addDepDone = await waitForOps((s) => s.op === null && s.history.some((o) => o.id === addDepCall.opId && o.status === 'done'))
+check('install cache-invalidation op settles done', !!addDepDone, addDepDone)
+const postAddUpdates = await call({ method: 'updates', profile: 'web' })
+check('updates recomputed after successful install (stale cache cleared)',
+  postAddUpdates.ok === true && postAddUpdates.updates && Object.prototype.hasOwnProperty.call(postAddUpdates.updates, 'fake-added'),
+  postAddUpdates)
 
 const tail = skipped > 0 ? ' (' + skipped + ' skipped)' : ''
 console.log(failures === 0 ? 'ALL PASS' + tail : failures + ' FAILURES' + tail)
