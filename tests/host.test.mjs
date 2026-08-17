@@ -12,7 +12,7 @@ mkdirSync(join(TEST_HOME, 'profiles', 'web'), { recursive: true })
 writeFileSync(join(TEST_HOME, 'profiles', 'web', 'package.json'), JSON.stringify({
   name: 'dsh-profile-web',
   private: true,
-  dependencies: { 'fake-installed': '^1.0.0', 'github-dep': 'github:Jesse-njx/dsh-memory', 'linked-dep': 'link:../dev-dep' },
+  dependencies: { 'fake-installed': '^1.0.0', 'github-dep': 'github:Jesse-njx/dsh-memory', 'linked-dep': 'link:../dev-dep', 'outcat-dep': 'github:somebody/not-in-catalog' },
   dsh: { profile: { bundles: ['fake-installed', 'builtin-bundle'] } },
 }, null, 2) + '\n')
 // A second, empty profile emulating a desktop shell's own profile: market
@@ -242,6 +242,40 @@ const deskUninst = await call({ method: 'uninstall', pkg: 'fake-installed', prof
 check('desktop uninstall enqueues', deskUninst.ok && deskUninst.opId, deskUninst)
 const deskUninstDone = await waitForOps((s) => s.op === null && s.history.some((o) => o.id === deskUninst.opId && o.status === 'done'))
 check('desktop uninstall settles done', !!deskUninstDone, deskUninstDone)
+
+// --- sync provenance (syncFrom): sync copies bypass the whitelist ---
+// isInstalledIn: the provenance predicate resolves against the source
+// profile's dependency-managed installs, never against the catalog.
+check('isInstalledIn true for a web-installed spec', mod.isInstalledIn('web', 'github:somebody/not-in-catalog') === true,
+  mod.isInstalledIn('web', 'github:somebody/not-in-catalog'))
+check('isInstalledIn true for a web-installed npm name', mod.isInstalledIn('web', 'fake-installed') === true,
+  mod.isInstalledIn('web', 'fake-installed'))
+check('isInstalledIn false for unknown source/profile', mod.isInstalledIn('web', 'github:not/anywhere') === false
+  && mod.isInstalledIn('__nope__', 'github:somebody/not-in-catalog') === false, 'unknown rejected')
+
+// A non-catalog github source installed in web: direct install to desktop is
+// still refused, but the same source with syncFrom='web' provenance passes —
+// the user already accepted it in web, so sync is a local copy.
+const syncRefused = await call({ method: 'install', source: 'github:somebody/not-in-catalog', profile: 'desktop', binPath: process.execPath })
+check('direct desktop install of non-catalog source still refused', syncRefused.ok === true && syncRefused.opId, syncRefused)
+const syncRefusedDone = await waitForOps((s) => s.op === null && s.history.some((o) => o.id === syncRefused.opId && o.status === 'refused'))
+check('direct desktop install refusal settles', !!syncRefusedDone, syncRefusedDone)
+
+writeFileSync(deskBin, `process.exit(0)\n`)
+const syncCall = await call({ method: 'install', source: 'github:somebody/not-in-catalog', profile: 'desktop', syncFrom: 'web', binPath: deskBin, label: 'sync-outcat' })
+check('sync install with provenance enqueues', syncCall.ok && syncCall.opId, syncCall)
+const syncDone = await waitForOps((s) => s.op === null && s.history.some((o) => o.id === syncCall.opId && o.status === 'done'))
+check('sync install bypasses whitelist and settles done', !!syncDone, syncDone)
+if (syncDone) {
+  const syncRow = syncDone.history.find((o) => o.id === syncCall.opId)
+  check('sync op output logs the provenance bypass', /跳过来源白名单/.test(syncRow.output || ''), (syncRow.output || '').slice(0, 300))
+}
+
+// Unproven syncFrom falls back to the whitelist (no bypass for unknown sources).
+const fakeSync = await call({ method: 'install', source: 'github:not/anywhere', profile: 'desktop', syncFrom: 'web', binPath: process.execPath })
+check('unproven sync install enqueued', fakeSync.ok === true && fakeSync.opId, fakeSync)
+const fakeSyncDone = await waitForOps((s) => s.op === null && s.history.some((o) => o.id === fakeSync.opId && o.status === 'refused'))
+check('unproven sync install still refused by whitelist', !!fakeSyncDone, fakeSyncDone)
 
 // --- catalog snapshot fallback (bundled data/catalog-snapshot.json) ---
 const snap = JSON.parse(readFileSync(join(dirname(fileURLToPath(new URL('../lib/host.js', import.meta.url))), '..', 'data', 'catalog-snapshot.json'), 'utf8'))
