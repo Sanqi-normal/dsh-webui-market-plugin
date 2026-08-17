@@ -532,8 +532,34 @@ check('github update target strips .git before pinning',
   mod.updateTargetFor('github:vlln/dsh-navbar.git', 'x', '6e23640bd60c0157043ae5c29a6d80034287b41b')
     === 'github:vlln/dsh-navbar#6e23640bd60c0157043ae5c29a6d80034287b41b',
   mod.updateTargetFor('github:vlln/dsh-navbar.git', 'x', '6e23640bd60c0157043ae5c29a6d80034287b41b'))
-check('npm update target uses name@latest', mod.updateTargetFor('^1.0.0', 'fake-installed', '1.2.0') === 'fake-installed@latest',
+check('npm update target pins detected version', mod.updateTargetFor('^1.0.0', 'fake-installed', '1.2.0') === 'fake-installed@1.2.0',
   mod.updateTargetFor('^1.0.0', 'fake-installed', '1.2.0'))
+check('npm update target keeps prerelease pins', mod.updateTargetFor('^1.0.0', 'fake-installed', '1.2.0-beta.1') === 'fake-installed@1.2.0-beta.1',
+  mod.updateTargetFor('^1.0.0', 'fake-installed', '1.2.0-beta.1'))
+check('npm update target falls back to dist-tag when version unknown',
+  mod.updateTargetFor('^1.0.0', 'fake-installed', null) === 'fake-installed@latest',
+  mod.updateTargetFor('^1.0.0', 'fake-installed', null))
+check('npm update target falls back to dist-tag on non-version junk',
+  mod.updateTargetFor('^1.0.0', 'fake-installed', 'HEAD') === 'fake-installed@latest',
+  mod.updateTargetFor('^1.0.0', 'fake-installed', 'HEAD'))
+
+// --- minimumReleaseAgeFor: mirror pnpm >=11's 24h supply-chain cutoff ---
+const savedAgeEnv = process.env.npm_config_minimum_release_age
+delete process.env.npm_config_minimum_release_age
+delete process.env.NPM_CONFIG_MINIMUM_RELEASE_AGE
+check('minimumReleaseAgeFor defaults to 24h', mod.minimumReleaseAgeFor('web') === 24 * 60 * 60 * 1000, mod.minimumReleaseAgeFor('web'))
+process.env.npm_config_minimum_release_age = '1d'
+check('minimumReleaseAgeFor parses 1d', mod.minimumReleaseAgeFor('web') === 24 * 60 * 60 * 1000, mod.minimumReleaseAgeFor('web'))
+process.env.npm_config_minimum_release_age = '36h'
+check('minimumReleaseAgeFor parses 36h', mod.minimumReleaseAgeFor('web') === 36 * 60 * 60 * 1000, mod.minimumReleaseAgeFor('web'))
+process.env.npm_config_minimum_release_age = '90m'
+check('minimumReleaseAgeFor parses 90m', mod.minimumReleaseAgeFor('web') === 90 * 60 * 1000, mod.minimumReleaseAgeFor('web'))
+process.env.npm_config_minimum_release_age = '2'
+check('minimumReleaseAgeFor bare number means hours', mod.minimumReleaseAgeFor('web') === 2 * 60 * 60 * 1000, mod.minimumReleaseAgeFor('web'))
+process.env.npm_config_minimum_release_age = 'bogus'
+check('minimumReleaseAgeFor falls back to 24h on junk', mod.minimumReleaseAgeFor('web') === 24 * 60 * 60 * 1000, mod.minimumReleaseAgeFor('web'))
+if (savedAgeEnv === undefined) delete process.env.npm_config_minimum_release_age
+else process.env.npm_config_minimum_release_age = savedAgeEnv
 
 // --- npm registry resolution for update checks ---
 const savedRegistryEnv = process.env.npm_config_registry
