@@ -1,18 +1,16 @@
 # dsh-webui-market-plugin[![awesome · DSH plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com)
 
-在 dsh web GUI 内部的社区插件市场：浏览 [awesome-dsh-plugin.com](https://awesome-dsh-plugin.com/) 的插件目录，直接在 **设置 → 插件 → 插件市场** 里安装 / 卸载插件到 profile。界面风格与 harness 前端一致（跟随系统深浅色主题），支持中英文（按系统语言自动切换）。
+> [English](README.en.md) | **中文**
 
-An in-harness community plugin market for the dsh web GUI: browse the awesome-dsh-plugin.com catalog and install/uninstall plugins into a profile from **Settings → Plugins → Plugin Market**.
+在 dsh web GUI 内部的社区插件市场：浏览 [awesome-dsh-plugin.com](https://awesome-dsh-plugin.com/) 的插件目录，直接在 **设置 → 插件 → 插件市场** 里安装 / 卸载插件到 profile。界面风格与 harness 前端一致（跟随系统深浅色主题），支持中英文（按系统语言自动切换）。
 
 推荐 awesome-dsh-plugin.com 网站的实现 [dsh-market](https://github.com/dsh-market/dsh-market)。
 
-Prefer the awesome-dsh-plugin.com implementation: [dsh-market](https://github.com/dsh-market/dsh-market).
-
-## 效果展示 Screenshot
+## 效果展示
 
 ![插件市场效果](img/51766e7935d9e67d7087510e4d6b0cb8.png)
 
-## 安装 Install
+## 安装
 
 方式一：从 **npm registry** 安装（推荐，无 git 克隆 / prepare 脚本步骤）：
 
@@ -34,9 +32,9 @@ pnpm dsh web
 
 GitHub 源安装会执行包内 prepare 脚本，如被 pnpm 拦截，把提示的包名加入 profile 的 `pnpm-workspace.yaml` 的 `allowBuilds` 后重试。
 
-pnpm 11 起，依赖树中“构建脚本未在 `allowBuilds` 中显式放行或拒绝”的包会直接导致 `ERR_PNPM_IGNORED_BUILDS`。若该包在当前 profile 不需要执行构建脚本，可把对应项写成 `false`（明确拒绝）而不是 `true`（放行执行）；市场插件的试装验证会继承真实 web profile 的 `pnpm-workspace.yaml`，因此这里的 `true/false` 决策也会作用于试装环境。
+pnpm 11 起，依赖树中"构建脚本未在 `allowBuilds` 中显式放行或拒绝"的包会直接导致 `ERR_PNPM_IGNORED_BUILDS`。若该包在当前 profile 不需要执行构建脚本，可把对应项写成 `false`（明确拒绝）而不是 `true`（放行执行）；市场插件的试装验证会继承真实 web profile 的 `pnpm-workspace.yaml`，因此这里的 `true/false` 决策也会作用于试装环境。
 
-## 使用 Usage
+## 使用
 
 打开 **设置（Settings）→ 插件（Plugins）→ 插件市场（Plugin Market）**：
 
@@ -54,16 +52,14 @@ pnpm 11 起，依赖树中“构建脚本未在 `allowBuilds` 中显式放行或
 - 每个插件卡片显示真实的已安装状态（与 profile 的 `package.json` 同步）：安装状态按「作者 + 仓库」（`owner/repo`）识别，目录里有同名插件（如两个作者的 `dsh-memory`）时，装了哪个作者就只显示哪个已安装，不会误标另一位作者的卡片；「本机插件」列表也会显示解析出的 `owner/repo` 身份
 - 顶部显示插件目录来源官网链接，可直接打开
 
-
-
-## 工作原理 How it works
+## 工作原理
 
 持久化 bundle（`package.json` 的 `dsh.bundle.patch` → `cordis.patch.yml`），由 `dsh plugin add` 的 reconcile 自动加入 profile 的 `dsh.profile.bundles` 层：
 
 - **Host 半**（`lib/host.js`）：注册 `/api/dsh-market` 路由，提供 `list`（读取官网 JSON API `plugins.json`，失败回退内置离线快照，含 stars/added；与官方 dsh-market 一致：先试官网 JSON，再用过期缓存，最后落离线快照，不解析官网 HTML）、`probe`（环境探测，含本机已初始化 profile 列表）、`installed` / `installedAll`（读取 profile package.json 与已装包 manifest）、`syncPlan`（跨 profile 只读差异：web 已装、目标 profile 缺失的插件清单）、`install` / `update` / `updateAll` / `uninstall`（FIFO 队列 + 后台 spawn `dsh plugin` CLI，白名单在队列头对**所有 profile** 执行、试装验证仅对 web 执行）、`disable` / `enable`（停用/启用并持久化到 `dsh.market.disabled`）、`op`（队列快照）、`kill`（终止/取消任务）
 - **Client 半**（`lib/client.js`）：通过 `exports["./client"]` + `dsh.client` 声明被 web 前端加载，注册到 `settings.plugins.tab` 槽位
 
-## 安全与限制 Safety and limitations
+## 安全与限制
 
 - **来源白名单**：安装只接受精选目录（awesome-dsh-plugin.com curated registry）收录的 `github:` 源，目录外的一律拒绝，与 [dsh-market](https://github.com/dsh-market/dsh-market) 的白名单策略一致（目录抓取失败或 registry/link 源不做此限制）；该白名单对**所有目标 profile**（含 desktop 同步）生效，勾选"跳过安全检查"才可绕过
 - **npm 优先（官方同款镜像策略）**：目录条目带 `npm` 映射时，优先用 npm 包名安装/更新（npm tarball 走 CDN/镜像，不依赖 GitHub 下载）；只有未发布 npm 的 GitHub-only 插件才走 GitHub 源。用户可在 npm/pnpm 配置中设置国内 registry 镜像（如 `registry=https://registry.npmmirror.com`），npm 源的安装/更新会自动走该镜像
@@ -75,7 +71,7 @@ pnpm 11 起，依赖树中“构建脚本未在 `allowBuilds` 中显式放行或
 - **离线目录快照**：`data/catalog-snapshot.json` 作为官网抓取失败时的离线兜底，可用 `pnpm run snapshot` 从官网 JSON API 直接抓取刷新（不走回退链，官网不可达时会失败而非复制旧数据）
 - **安装前自动快照**：写入任一 profile 前会把 `package.json` 备份为同目录 `.mkts-snapshot-<时间戳>.json`（跨 profile 同步与"跳过安全检查"的安装同样备份），配合 `dsh plugin --profile <name> remove <包名>` 可手工回退
 - **CI=true**：pnpm 子进程以 CI 模式运行，避免无 TTY 时静默卡在交互提示
-- **网络超时控制**：pnpm 子进程默认使用较短的 `fetch-timeout`（30s）和 `fetch-retries`（1），避免弱网下“GET 链接 error 一直 retry”拖到任务超时；可用 `DSH_MARKET_FETCH_TIMEOUT_MS`、`DSH_MARKET_FETCH_RETRIES`、`DSH_MARKET_FETCH_RETRY_MINTIMEOUT_MS`、`DSH_MARKET_FETCH_RETRY_MAXTIMEOUT_MS` 覆盖；前端 `/api/dsh-market` 请求默认 30 秒超时，防止面板因外部网络卡死
+- **网络超时控制**：pnpm 子进程默认使用较短的 `fetch-timeout`（30s）和 `fetch-retries`（1），避免弱网下"GET 链接 error 一直 retry"拖到任务超时；可用 `DSH_MARKET_FETCH_TIMEOUT_MS`、`DSH_MARKET_FETCH_RETRIES`、`DSH_MARKET_FETCH_RETRY_MINTIMEOUT_MS`、`DSH_MARKET_FETCH_RETRY_MAXTIMEOUT_MS` 覆盖；前端 `/api/dsh-market` 请求默认 30 秒超时，防止面板因外部网络卡死
 - **停用持久化**：停用状态写入 profile `package.json` 的 `dsh.market.disabled`（保留依赖、移出 `dsh.profile.bundles`）；市场在启动时和每次 pnpm 操作后会重新应用该集合。注意：在命令行手工执行 `dsh plugin add/remove/update` 会触发 reconcile 短暂恢复停用项，重启或下一次市场操作会再次停用
 - 安装 / 卸载后需重启 web 服务生效（热挂载成功的除外，本插件不做自动重启）
 - 目录数据来自官网 JSON API（`plugins.json`，与 [dsh-market](https://github.com/dsh-market/dsh-market) 同源，含 Star 数），抓取失败时按「过期缓存 → 内置离线快照」回退（与官方 dsh-market 策略一致，不再解析官网 HTML 静态页）；插件数量与分类以官网为准
