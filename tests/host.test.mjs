@@ -172,6 +172,31 @@ writeFileSync(probeBin, `process.stdout.write('pnpm: network unreachable\\n')\np
 const probeInstallFail = await mod.runProbe(probeBin, 'fake:neterr')
 check('probe fails on install error', probeInstallFail.ok === false && probeInstallFail.stage === 'install' && /pnpm/.test(probeInstallFail.output || ''), probeInstallFail)
 
+// Probe seeds the throwaway pnpm-workspace.yaml from the real web profile so
+// trial installs honor existing allowBuilds/minimumReleaseAgeExclude settings.
+const inheritYaml = join(TEST_HOME, 'profiles', 'web', 'pnpm-workspace.yaml')
+writeFileSync(inheritYaml, 'packages:\n  - .\n\nallowBuilds:\n  cloudflared: false\n  node-pty: true\n')
+const probeInheritBin = join(tmpdir(), 'mkts-probe-inherit-bin-' + process.pid + '.mjs')
+writeFileSync(probeInheritBin, `
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+const isBoot = !process.argv.includes('plugin') && process.argv.includes('--port')
+if (isBoot) {
+  process.stdout.write('dsh web: http://127.0.0.1:0\\n')
+  process.exit(0)
+}
+const yaml = readFileSync(join(process.env.DSH_HOME, 'profiles', 'web', 'pnpm-workspace.yaml'), 'utf8')
+if (!yaml.includes('cloudflared: false') || !yaml.includes('node-pty: true')) {
+  process.stderr.write('INHERIT FAIL: ' + yaml + '\\n')
+  process.exit(1)
+}
+process.stdout.write('fake-bin installing\\n')
+process.exit(0)
+`)
+const probeInheritOk = await mod.runProbe(probeInheritBin, 'fake:inherit')
+check('probe seeds throwaway yaml from real profile workspace', probeInheritOk.ok === true, probeInheritOk)
+rmSync(inheritYaml, { force: true })
+
 // --- same-origin gate on write operations ---
 const crossOrigin = await call({ method: 'install', source: 'fake:any', profile: 'web', binPath: process.execPath }, { origin: 'http://evil.example' })
 check('install rejected cross-origin', crossOrigin.ok === false && /untrusted/.test(crossOrigin.error || ''), crossOrigin)

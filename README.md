@@ -34,6 +34,8 @@ pnpm dsh web
 
 GitHub 源安装会执行包内 prepare 脚本，如被 pnpm 拦截，把提示的包名加入 profile 的 `pnpm-workspace.yaml` 的 `allowBuilds` 后重试。
 
+pnpm 11 起，依赖树中“构建脚本未在 `allowBuilds` 中显式放行或拒绝”的包会直接导致 `ERR_PNPM_IGNORED_BUILDS`。若该包在当前 profile 不需要执行构建脚本，可把对应项写成 `false`（明确拒绝）而不是 `true`（放行执行）；市场插件的试装验证会继承真实 web profile 的 `pnpm-workspace.yaml`，因此这里的 `true/false` 决策也会作用于试装环境。
+
 ## 使用 Usage
 
 打开 **设置（Settings）→ 插件（Plugins）→ 插件市场（Plugin Market）**：
@@ -65,7 +67,7 @@ GitHub 源安装会执行包内 prepare 脚本，如被 pnpm 拦截，把提示�
 
 - **来源白名单**：安装只接受精选目录（awesome-dsh-plugin.com curated registry）收录的 `github:` 源，目录外的一律拒绝，与 [dsh-market](https://github.com/dsh-market/dsh-market) 的白名单策略一致（目录抓取失败或 registry/link 源不做此限制）；该白名单对**所有目标 profile**（含 desktop 同步）生效，勾选"跳过安全检查"才可绕过
 - **npm 优先（官方同款镜像策略）**：目录条目带 `npm` 映射时，优先用 npm 包名安装/更新（npm tarball 走 CDN/镜像，不依赖 GitHub 下载）；只有未发布 npm 的 GitHub-only 插件才走 GitHub 源。用户可在 npm/pnpm 配置中设置国内 registry 镜像（如 `registry=https://registry.npmmirror.com`），npm 源的安装/更新会自动走该镜像
-- **试装验证（trial boot）**：白名单通过后，若插件未声明 web client 半端（`dsh.client.platform === 'web'`），会先做**试装验证**：在临时 DSH_HOME 里按 web profile 模板重建组合，用同一套 `dsh plugin add` 装入候选插件，再以 `--port 0`（系统空闲端口）实际启动一次，只有出现 `dsh web:` 就绪行（Loader 树成功结算后才打印）才判定可装。验证失败会给出**真实的启动错误**（如重复 api-gateway / webserver 等）并拒绝安装，此时真实 profile 从未被写入、试装目录自动清理，无需任何回退操作。**试装验证仅对 web profile 执行**：非 web profile（如 desktop）的组合由对应桌面壳定义、市场无法在临时环境复刻，其安装由「来源白名单 + 安装前快照」把关（同样无破坏性，只是没有启动判定）
+- **试装验证（trial boot）**：白名单通过后，若插件未声明 web client 半端（`dsh.client.platform === 'web'`），会先做**试装验证**：在临时 DSH_HOME 里按 web profile 模板重建组合，用同一套 `dsh plugin add` 装入候选插件，再以 `--port 0`（系统空闲端口）实际启动一次，只有出现 `dsh web:` 就绪行（Loader 树成功结算后才打印）才判定可装。验证失败会给出**真实的启动错误**（如重复 api-gateway / webserver 等）并拒绝安装，此时真实 profile 从未被写入、试装目录自动清理，无需任何回退操作。**试装验证仅对 web profile 执行**：非 web profile（如 desktop）的组合由对应桌面壳定义、市场无法在临时环境复刻，其安装由「来源白名单 + 安装前快照」把关（同样无破坏性，只是没有启动判定）。试装环境会继承真实 web profile 的 `pnpm-workspace.yaml`（`allowBuilds` / `minimumReleaseAgeExclude`），因此已在真实 profile 中显式拒绝（`false`）的构建脚本不会在试装时被重新放行或执行。
 - **跨 profile 同步只增不删**：`syncPlan` 只计算「web 已装、目标缺失」的插件，且要求目标 profile 已初始化（避免误建空 profile）；同步仅补装、绝不删除或降级目标 profile 里已有的任何内容。同步安装携带 `syncFrom` 来源校验：仅当目标源确为源 profile 已装依赖时才放行（本地复制，不视为新的远端信任决策），未通过校验的仍走目录白名单；装到 desktop 等 profile 后需重启对应应用生效
 - **同源校验**：`install` / `uninstall` / `update` / `kill` 写操作只接受同源 POST（Origin 头与 Host 一致），跨源请求一律 403
 - **热挂载（免重启）**：安装成功后，若新插件的 `cordis.patch.yml` 是纯 `id`/`name` 插入行，会尝试挂入运行中的组合并**自动刷新页面生效**（无需手动操作）；patch 复杂或环境不支持时回退"重启生效"。热挂载输入存于 `<profile>/.dsh-market/`，每次启动自动清理；热挂载、热卸载与 Loader 停用/启用只作用于运行中的 **web** profile，desktop 等其它 profile 的操作不会触碰 web 的运行态
