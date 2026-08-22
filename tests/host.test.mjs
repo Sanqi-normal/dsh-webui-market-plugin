@@ -207,6 +207,19 @@ check('kill rejected cross-origin', crossKill.ok === false && /untrusted/.test(c
 const crossToggle = await call({ method: 'disable', name: 'fake-installed', profile: 'web' }, { origin: 'http://evil.example' })
 check('disable rejected cross-origin', crossToggle.ok === false && /untrusted/.test(crossToggle.error || ''), crossToggle)
 
+// DNS rebinding: the page resolves its own hostname to 127.0.0.1, so it
+// controls BOTH headers and they match each other. Comparing Origin to Host
+// alone passes here — the Host has to be pinned to loopback.
+const rebound = await call({ method: 'install', source: 'fake:any', profile: 'web', binPath: process.execPath }, { origin: 'http://evil.example', host: 'evil.example' })
+check('install rejected when Host is not ours (DNS rebinding)', rebound.ok === false && /untrusted/.test(rebound.error || ''), rebound)
+
+const reboundKill = await call({ method: 'kill' }, { origin: 'http://evil.example', host: 'evil.example' })
+check('kill rejected when Host is not ours (DNS rebinding)', reboundKill.ok === false && /untrusted/.test(reboundKill.error || ''), reboundKill)
+
+// A loopback Host by any spelling still works, so the fence does not break the UI.
+const viaLocalhost = await call({ method: 'list' }, { origin: 'http://localhost:3080', host: 'localhost:3080' })
+check('same-origin request via localhost still accepted', viaLocalhost.ok === true, viaLocalhost)
+
 // --- source whitelist (curated catalog only) ---
 const notListed = await call({ method: 'install', source: 'github:somebody/not-in-catalog', profile: 'web', binPath: process.execPath })
 check('install enqueued (whitelist now checked at queue head)', notListed.ok === true && notListed.opId, notListed)
